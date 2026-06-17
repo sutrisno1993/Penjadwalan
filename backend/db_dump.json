@@ -1,0 +1,593 @@
+{
+  "teachers": [
+    {
+      "id_guru": 1,
+      "nama_guru": "REZA PATRIOTA PUTRA, S.Kom",
+      "kode_guru": 1
+    },
+    {
+      "id_guru": 2,
+      "nama_guru": "TAMAN SASTRA DIKARNA, S.Pd",
+      "kode_guru": 2
+    },
+    {
+      "id_guru": 3,
+      "nama_guru": "SUHARNO, S.Pdi",
+      "kode_guru": 3
+    },
+    {
+      "id_guru": 4,
+      "nama_guru": "SAMSUL HUDA, S.Pd",
+      "kode_guru": 4
+    },
+    {
+      "id_guru": 5,
+      "nama_guru": "AHMAD HUSEN NASUTION, SS",
+      "kode_guru": 5
+    },
+    {
+      "id_guru": 6,
+      "nama_guru": "WISNU NARA UTAMA, S.Pd",
+      "kode_guru": 6
+    },
+    {
+      "id_guru": 7,
+      "nama_guru": "FITRI MULYANI, S.Pd",
+      "kode_guru": 7
+    },
+    {
+      "id_guru": 8,
+      "nama_guru": "DERA ISMAWATI, A.Md",
+      "kode_guru": 8
+    },
+    {
+      "id_guru": 9,
+      "nama_guru": "WIDONI SANTOSO, S.Pd",
+      "kode_guru": 9
+    },
+    {
+      "id_guru": 10,
+      "nama_guru": "SRI TITA MULYATI",
+      "kode_guru": 10
+    },
+    {
+      "id_guru": 11,
+      "nama_guru": "EUIS SUPRIHATIN, S.Pd",
+      "kode_guru": 11
+    },
+    {
+      "id_guru": 12,
+      "nama_guru": "WIDA HARTANI, S.Pd",
+      "kode_guru": 12
+    },
+    {
+      "id_guru": 13,
+      "nama_guru": "LUTHFI AHMAD NAZHIF, S.Pd",
+      "kode_guru": 13
+    },
+    {
+      "id_guru": 14,
+      "nama_guru": "WIDJAYANTI, S.Sos",
+      "kode_guru": 14
+    },
+    {
+      "id_guru": 15,
+      "nama_guru": "DEDE HIDAYATULLAH",
+      "kode_guru": 15
+    },
+    {
+      "id_guru": 16,
+      "nama_guru": "KOKO, S.T",
+      "kode_guru": 16
+    },
+    {
+      "id_guru": 17,
+      "nama_guru": "CHRISTIN SIREGAR, S.Pd",
+      "kode_guru": 17
+    },
+    {
+      "id_guru": 18,
+      "nama_guru": "MUHAMMAD SYAFE'I, S.Pd",
+      "kode_guru": 18
+    },
+    {
+      "id_guru": 19,
+      "nama_guru": "MUHAMMAD ANDIKA PRAWIRA, S.Kom",
+      "kode_guru": 19
+    },
+    {
+      "id_guru": 20,
+      "nama_guru": "DRA. SRI CHANDRI YANI",
+      "kode_guru": 20
+    },
+    {
+      "id_guru": 21,
+      "nama_guru": "YULISTIO HARDIYANTO, S.T",
+      "kode_guru": 21
+    },
+    {
+      "id_guru": 22,
+      "nama_guru": "KUAT SUPARTO, S.T",
+      "kode_guru": 22
+    },
+    {
+      "id_guru": 23,
+      "nama_guru": "ASTRI WULANDARI, S.Ak",
+      "kode_guru": 23
+    },
+    {
+      "id_guru": 24,
+      "nama_guru": "ARIEF AKBAR FATAHIILLAH",
+      "kode_guru": 24
+    },
+    {
+      "id_guru": 25,
+      "nama_guru": "AGUNG AINUL HAKIM, S.Pd",
+      "kode_guru": 25
+    },
+    {
+      "id_guru": 26,
+      "nama_guru": "SUTRISNO",
+      "kode_guru": 26
+    },
+    {
+      "id_guru": 27,
+      "nama_guru": "MUHAMMAD ALBAR SAPIN, S.M",
+      "kode_guru": 27
+    },
+    {
+      "id_guru": 28,
+      "nama_guru": "TIARA SHANTI HARTONO, S.Sos",
+      "kode_guru": 28
+    },
+    {
+      "id_guru": 29,
+      "nama_guru": "OKTARI QOMIMIS SYATUN, S.Pd",
+      "kode_guru": 29
+    },
+    {
+      "id_guru": 30,
+      "nama_guru": "CATUR WULANDARI, A.Md",
+      "kode_guru": 30
+    },
+    {
+      "id_guru": 31,
+      "nama_guru": "DWIANA RIKASARI, S.AP",
+      "kode_guru": 31
+    },
+    {
+      "id_guru": 32,
+      "nama_guru": "IDAYATUL MUSTAFIDAH, S.E",
+      "kode_guru": 32
+    },
+    {
+      "id_guru": 33,
+      "nama_guru": "RISKA AMELIA, S.M",
+      "kode_guru": 33
+    },
+    {
+      "id_guru": 34,
+      "nama_guru": "SISTER NINDA PUTRI, S.Pd",
+      "kode_guru": 34
+    },
+    {
+      "id_guru": 35,
+      "nama_guru": "DELA AMELIA PUTRI, S.Pd",
+      "kode_guru": 35
+    },
+    {
+      "id_guru": 36,
+      "nama_guru": "WIWIK UMAYAH, S.Pd",
+      "kode_guru": 36
+    },
+    {
+      "id_guru": 37,
+      "nama_guru": "ENDANG KURNIAWAN, S.T",
+      "kode_guru": 37
+    }
+  ],
+  "classes": [
+    {
+      "id_kelas": 18,
+      "nama_kelas": "X AK 1",
+      "shift_operasional": "PAGI"
+    },
+    {
+      "id_kelas": 19,
+      "nama_kelas": "X OTKP 1",
+      "shift_operasional": "PAGI"
+    },
+    {
+      "id_kelas": 20,
+      "nama_kelas": "X OTKP 2",
+      "shift_operasional": "SIANG"
+    },
+    {
+      "id_kelas": 21,
+      "nama_kelas": "X TKJ 1",
+      "shift_operasional": "PAGI"
+    },
+    {
+      "id_kelas": 22,
+      "nama_kelas": "X TKJ 2",
+      "shift_operasional": "SIANG"
+    },
+    {
+      "id_kelas": 23,
+      "nama_kelas": "X TKR 1",
+      "shift_operasional": "PAGI"
+    },
+    {
+      "id_kelas": 24,
+      "nama_kelas": "X TKR 2",
+      "shift_operasional": "SIANG"
+    },
+    {
+      "id_kelas": 25,
+      "nama_kelas": "X TSM 1",
+      "shift_operasional": "PAGI"
+    },
+    {
+      "id_kelas": 26,
+      "nama_kelas": "X TSM 2",
+      "shift_operasional": "SIANG"
+    },
+    {
+      "id_kelas": 10,
+      "nama_kelas": "XI AK 1",
+      "shift_operasional": "SIANG"
+    },
+    {
+      "id_kelas": 11,
+      "nama_kelas": "XI OTKP 1",
+      "shift_operasional": "SIANG"
+    },
+    {
+      "id_kelas": 12,
+      "nama_kelas": "XI OTKP 2",
+      "shift_operasional": "SIANG"
+    },
+    {
+      "id_kelas": 13,
+      "nama_kelas": "XI TKJ 1",
+      "shift_operasional": "SIANG"
+    },
+    {
+      "id_kelas": 14,
+      "nama_kelas": "XI TKJ 2",
+      "shift_operasional": "SIANG"
+    },
+    {
+      "id_kelas": 15,
+      "nama_kelas": "XI TKR 1",
+      "shift_operasional": "SIANG"
+    },
+    {
+      "id_kelas": 16,
+      "nama_kelas": "XI TSM 1",
+      "shift_operasional": "SIANG"
+    },
+    {
+      "id_kelas": 17,
+      "nama_kelas": "XI TSM 2",
+      "shift_operasional": "SIANG"
+    },
+    {
+      "id_kelas": 1,
+      "nama_kelas": "XII AK 1",
+      "shift_operasional": "PAGI"
+    },
+    {
+      "id_kelas": 2,
+      "nama_kelas": "XII OTKP 1",
+      "shift_operasional": "PAGI"
+    },
+    {
+      "id_kelas": 3,
+      "nama_kelas": "XII OTKP 2",
+      "shift_operasional": "PAGI"
+    },
+    {
+      "id_kelas": 4,
+      "nama_kelas": "XII TKJ 1",
+      "shift_operasional": "PAGI"
+    },
+    {
+      "id_kelas": 5,
+      "nama_kelas": "XII TKJ 2",
+      "shift_operasional": "PAGI"
+    },
+    {
+      "id_kelas": 6,
+      "nama_kelas": "XII TKR 1",
+      "shift_operasional": "PAGI"
+    },
+    {
+      "id_kelas": 7,
+      "nama_kelas": "XII TKR 2",
+      "shift_operasional": "PAGI"
+    },
+    {
+      "id_kelas": 8,
+      "nama_kelas": "XII TSM 1",
+      "shift_operasional": "PAGI"
+    },
+    {
+      "id_kelas": 9,
+      "nama_kelas": "XII TSM 2",
+      "shift_operasional": "PAGI"
+    }
+  ],
+  "subjects": [
+    {
+      "id_mapel": 13,
+      "nama_mapel": "Adm Pajak",
+      "kategori_mapel": "Kelompok C (Peminatan) - Paket Keahlian Akuntansi"
+    },
+    {
+      "id_mapel": 21,
+      "nama_mapel": "Adm Sistem Jaringan",
+      "kategori_mapel": "Kelompok C (Peminatan) - Paket Keahlian Teknik Komputer dan Jaringan"
+    },
+    {
+      "id_mapel": 20,
+      "nama_mapel": "Administrasi Infrastruktur Jaringan",
+      "kategori_mapel": "Kelompok C (Peminatan) - Paket Keahlian Teknik Komputer dan Jaringan"
+    },
+    {
+      "id_mapel": 45,
+      "nama_mapel": "Administrasi Umum",
+      "kategori_mapel": "Dasar Program Keahlian - Paket Keahlian Administrasi Perkantoran"
+    },
+    {
+      "id_mapel": 11,
+      "nama_mapel": "AK Keuangan",
+      "kategori_mapel": "Kelompok C (Peminatan) - Paket Keahlian Akuntansi"
+    },
+    {
+      "id_mapel": 10,
+      "nama_mapel": "AK Lembaga",
+      "kategori_mapel": "Kelompok C (Peminatan) - Paket Keahlian Akuntansi"
+    },
+    {
+      "id_mapel": 9,
+      "nama_mapel": "AK Manufaktur",
+      "kategori_mapel": "Kelompok C (Peminatan) - Paket Keahlian Akuntansi"
+    },
+    {
+      "id_mapel": 43,
+      "nama_mapel": "Akuntansi Dasar",
+      "kategori_mapel": "Dasar Program Keahlian - Paket Keahlian Akuntansi"
+    },
+    {
+      "id_mapel": 42,
+      "nama_mapel": "Aplikasi Pengolah Angka / Spreadsheet",
+      "kategori_mapel": "Dasar Program Keahlian - Paket Keahlian Akuntansi"
+    },
+    {
+      "id_mapel": 3,
+      "nama_mapel": "Bahasa Indonesia",
+      "kategori_mapel": "Mata Pelajaran Umum"
+    },
+    {
+      "id_mapel": 6,
+      "nama_mapel": "Bahasa Inggris",
+      "kategori_mapel": "Mata Pelajaran Kejuruan"
+    },
+    {
+      "id_mapel": 51,
+      "nama_mapel": "Bisnis Teknologi Informasi",
+      "kategori_mapel": "Dasar Program Keahlian - Paket Keahlian Teknik Komputer dan Jaringan"
+    },
+    {
+      "id_mapel": 50,
+      "nama_mapel": "Dasar Jaringan Komputer",
+      "kategori_mapel": "Dasar Program Keahlian - Paket Keahlian Teknik Komputer dan Jaringan"
+    },
+    {
+      "id_mapel": 29,
+      "nama_mapel": "Ekonomi Bisnis",
+      "kategori_mapel": "Kelompok C (Peminatan) - Paket Keahlian Akuntansi"
+    },
+    {
+      "id_mapel": 40,
+      "nama_mapel": "Etika Profesi",
+      "kategori_mapel": "Dasar Program Keahlian - Paket Keahlian Akuntansi"
+    },
+    {
+      "id_mapel": 54,
+      "nama_mapel": "Gambar Teknik",
+      "kategori_mapel": "Dasar Program Keahlian - Paket Keahlian Teknik Kend. Ringan dan Teknik Sepeda Motor"
+    },
+    {
+      "id_mapel": 38,
+      "nama_mapel": "Informatika",
+      "kategori_mapel": "Mata Pelajaran Kejuruan"
+    },
+    {
+      "id_mapel": 39,
+      "nama_mapel": "IPAS",
+      "kategori_mapel": "Mata Pelajaran Kejuruan"
+    },
+    {
+      "id_mapel": 41,
+      "nama_mapel": "K3LH",
+      "kategori_mapel": "Dasar Program Keahlian - Paket Keahlian Teknik Kend. Ringan dan Teknik Sepeda Motor"
+    },
+    {
+      "id_mapel": 32,
+      "nama_mapel": "Kearsipan",
+      "kategori_mapel": "Kelompok C (Peminatan) - Paket Keahlian Administrasi Perkantoran"
+    },
+    {
+      "id_mapel": 94,
+      "nama_mapel": "Kelistrikan Kendaraan Ringan",
+      "kategori_mapel": "PRODUKTIF"
+    },
+    {
+      "id_mapel": 95,
+      "nama_mapel": "Kelistrikan Sepeda Motor",
+      "kategori_mapel": "PRODUKTIF"
+    },
+    {
+      "id_mapel": 111,
+      "nama_mapel": "KKA / Coding",
+      "kategori_mapel": "PRODUKTIF"
+    },
+    {
+      "id_mapel": 12,
+      "nama_mapel": "Komputer Akuntansi",
+      "kategori_mapel": "Kelompok C (Peminatan) - Paket Keahlian Akuntansi"
+    },
+    {
+      "id_mapel": 47,
+      "nama_mapel": "Korespondensi",
+      "kategori_mapel": "Dasar Program Keahlian - Paket Keahlian Administrasi Perkantoran"
+    },
+    {
+      "id_mapel": 98,
+      "nama_mapel": "Main. Mesin Kendaraan",
+      "kategori_mapel": "PRODUKTIF"
+    },
+    {
+      "id_mapel": 26,
+      "nama_mapel": "Main. Mesin Sepeda Motor",
+      "kategori_mapel": "Kelompok C (Peminatan) - Paket Keahlian Teknik dan Bisnis Sepeda Motor"
+    },
+    {
+      "id_mapel": 24,
+      "nama_mapel": "Main. Sasis Kendaraan",
+      "kategori_mapel": "Kelompok C (Peminatan) - Paket Keahlian Teknik Kendaraan Ringan"
+    },
+    {
+      "id_mapel": 27,
+      "nama_mapel": "Main. Sasis Sepeda Motor",
+      "kategori_mapel": "Kelompok C (Peminatan) - Paket Keahlian Teknik dan Bisnis Sepeda Motor"
+    },
+    {
+      "id_mapel": 4,
+      "nama_mapel": "Matematika",
+      "kategori_mapel": "Mata Pelajaran Kejuruan"
+    },
+    {
+      "id_mapel": 48,
+      "nama_mapel": "OTK Humas (X)",
+      "kategori_mapel": "Dasar Program Keahlian - Paket Keahlian Administrasi Perkantoran"
+    },
+    {
+      "id_mapel": 36,
+      "nama_mapel": "OTK Humas (XI)",
+      "kategori_mapel": "Kelompok C (Peminatan) - Paket Keahlian Administrasi Perkantoran"
+    },
+    {
+      "id_mapel": 18,
+      "nama_mapel": "OTK Humas (XII)",
+      "kategori_mapel": "Kelompok C (Peminatan) - Paket Keahlian Administrasi Perkantoran"
+    },
+    {
+      "id_mapel": 33,
+      "nama_mapel": "OTK Kepegawaian (XI)",
+      "kategori_mapel": "Kelompok C (Peminatan) - Paket Keahlian Administrasi Perkantoran"
+    },
+    {
+      "id_mapel": 15,
+      "nama_mapel": "OTK Kepegawaian (XII)",
+      "kategori_mapel": "Kelompok C (Peminatan) - Paket Keahlian Administrasi Perkantoran"
+    },
+    {
+      "id_mapel": 34,
+      "nama_mapel": "OTK Keuangan (XI)",
+      "kategori_mapel": "Kelompok C (Peminatan) - Paket Keahlian Administrasi Perkantoran"
+    },
+    {
+      "id_mapel": 16,
+      "nama_mapel": "OTK Keuangan (XII)",
+      "kategori_mapel": "Kelompok C (Peminatan) - Paket Keahlian Administrasi Perkantoran"
+    },
+    {
+      "id_mapel": 35,
+      "nama_mapel": "OTK Sarpras (XI)",
+      "kategori_mapel": "Kelompok C (Peminatan) - Paket Keahlian Administrasi Perkantoran"
+    },
+    {
+      "id_mapel": 17,
+      "nama_mapel": "OTK Sarpras (XII)",
+      "kategori_mapel": "Kelompok C (Peminatan) - Paket Keahlian Administrasi Perkantoran"
+    },
+    {
+      "id_mapel": 53,
+      "nama_mapel": "PDTO",
+      "kategori_mapel": "Dasar Program Keahlian - Paket Keahlian Teknik Kend. Ringan dan Teknik Sepeda Motor"
+    },
+    {
+      "id_mapel": 23,
+      "nama_mapel": "Pemeliharaan Mesin Kendaraan Ringan",
+      "kategori_mapel": "Kelompok C (Peminatan) - Paket Keahlian Teknik Kendaraan Ringan"
+    },
+    {
+      "id_mapel": 1,
+      "nama_mapel": "Pendidikan Agama dan Budi Pekerti",
+      "kategori_mapel": "Mata Pelajaran Umum"
+    },
+    {
+      "id_mapel": 8,
+      "nama_mapel": "Penjasorkes",
+      "kategori_mapel": "Mata Pelajaran Umum"
+    },
+    {
+      "id_mapel": 44,
+      "nama_mapel": "Perbankan Dasar",
+      "kategori_mapel": "Dasar Program Keahlian - Paket Keahlian Akuntansi"
+    },
+    {
+      "id_mapel": 14,
+      "nama_mapel": "PKK",
+      "kategori_mapel": "Kelompok C (Peminatan) - Paket Keahlian Teknik dan Bisnis Sepeda Motor"
+    },
+    {
+      "id_mapel": 2,
+      "nama_mapel": "PPKn",
+      "kategori_mapel": "Mata Pelajaran Umum"
+    },
+    {
+      "id_mapel": 5,
+      "nama_mapel": "Sejarah Indonesia",
+      "kategori_mapel": "Mata Pelajaran Umum"
+    },
+    {
+      "id_mapel": 7,
+      "nama_mapel": "Seni Budaya",
+      "kategori_mapel": "Mata Pelajaran Umum"
+    },
+    {
+      "id_mapel": 52,
+      "nama_mapel": "TDO",
+      "kategori_mapel": "Dasar Program Keahlian - Paket Keahlian Teknik Kend. Ringan dan Teknik Sepeda Motor"
+    },
+    {
+      "id_mapel": 37,
+      "nama_mapel": "Tek Insfrs Jaringan",
+      "kategori_mapel": "Kelompok C (Peminatan) - Paket Keahlian Teknik Komputer dan Jaringan"
+    },
+    {
+      "id_mapel": 22,
+      "nama_mapel": "Tek Layanan Jaringan",
+      "kategori_mapel": "Kelompok C (Peminatan) - Paket Keahlian Teknik Komputer dan Jaringan"
+    },
+    {
+      "id_mapel": 49,
+      "nama_mapel": "Teknologi Jaringan Komputer",
+      "kategori_mapel": "Dasar Program Keahlian - Paket Keahlian Teknik Komputer dan Jaringan"
+    },
+    {
+      "id_mapel": 46,
+      "nama_mapel": "Teknologi Perkantoran",
+      "kategori_mapel": "Dasar Program Keahlian - Paket Keahlian Administrasi Perkantoran"
+    },
+    {
+      "id_mapel": 19,
+      "nama_mapel": "Wide Area Network (WAN)",
+      "kategori_mapel": "Kelompok C (Peminatan) - Paket Keahlian Teknik Komputer dan Jaringan"
+    }
+  ]
+}

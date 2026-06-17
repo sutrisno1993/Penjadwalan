@@ -1,0 +1,1656 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>SITAB - Generator Jadwal Otomatis SMK</title>
+  <meta name="description" content="SITAB: Sistem generator jadwal pelajaran otomatis dual-shift SMK dengan OR-Tools CP-SAT Solver.">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    :root {
+      --bg: #0f1117; --surface: #1a1d27; --surface2: #22263a;
+      --border: #2e3349; --primary: #6366f1; --primary-h: #818cf8;
+      --success: #22c55e; --info: #38bdf8; --warn: #f59e0b; --danger: #ef4444;
+      --text: #e2e8f0; --muted: #94a3b8;
+    }
+    body { font-family: 'Inter', sans-serif; background: var(--bg); color: var(--text); font-size: 14px; line-height: 1.6; }
+    a { text-decoration: none; }
+    input, select, textarea, button { font-family: inherit; font-size: 14px; }
+
+    /* Layout */
+    #app { display: flex; height: 100vh; overflow: hidden; }
+
+    /* Sidebar */
+    #sidebar {
+      width: 210px; flex-shrink: 0; transition: width 0.3s ease;
+      background: var(--surface); border-right: 1px solid var(--border);
+      display: flex; flex-direction: column; padding: 16px 10px; gap: 6px;
+      position: relative;
+    }
+    
+    #sidebar.minimized {
+      width: 70px;
+    }
+    
+    #sidebar.minimized .nav-text,
+    #sidebar.minimized .brand-text {
+      display: none;
+    }
+    
+    .sidebar-toggle {
+      position: absolute; top: 10px; right: -15px;
+      width: 30px; height: 30px; border-radius: 50%;
+      background: var(--primary); color: white; border: none;
+      cursor: pointer; display: flex; align-items: center; justify-content: center;
+      z-index: 100; box-shadow: 0 2px 8px rgba(0,0,0,0.3);
+    }
+    
+    #sidebar.minimized .sidebar-toggle i {
+      transform: rotate(180deg);
+    }
+    
+    .brand {
+      display: flex; align-items: center; gap: 10px;
+      padding: 8px 8px 18px; border-bottom: 1px solid var(--border); margin-bottom: 6px;
+    }
+    .brand { display: flex; align-items: center; gap: 10px; padding: 8px 8px 18px; border-bottom: 1px solid var(--border); margin-bottom: 6px; }
+    .brand i { font-size: 1.5rem; color: var(--primary); }
+    .brand strong { display: block; font-size: 1rem; }
+    .brand small { color: var(--muted); font-size: .7rem; }
+    .nav-item { display: flex; align-items: center; gap: 9px; padding: 9px 12px; border-radius: 8px; color: var(--muted); cursor: pointer; border: none; background: none; width: 100%; text-align: left; transition: .15s; font-size: .88rem; }
+    .nav-item:hover { background: var(--surface2); color: var(--text); }
+    .nav-item.on { background: var(--primary); color: #fff; }
+    .sidebar-foot { margin-top: auto; padding-top: 12px; border-top: 1px solid var(--border); }
+
+    /* Main */
+    #main { flex: 1; display: flex; flex-direction: column; overflow: hidden; min-width: 0; }
+
+    /* Topbar */
+    #topbar { display: flex; align-items: center; justify-content: space-between; padding: 14px 24px; border-bottom: 1px solid var(--border); background: var(--surface); flex-wrap: wrap; gap: 12px; flex-shrink: 0; }
+    #topbar h2 { font-size: 1.2rem; font-weight: 700; }
+    #topbar p { color: var(--muted); font-size: .82rem; }
+    .topbar-btns { display: flex; gap: 8px; flex-wrap: wrap; }
+
+    /* Content */
+    #content { flex: 1; overflow-y: auto; }
+    .page { display: none; padding: 22px 24px; }
+    .page.on { display: block; }
+
+    /* Sub-nav */
+    .sub-nav { display: flex; gap: 4px; margin-bottom: 18px; border-bottom: 1px solid var(--border); padding-bottom: 10px; flex-wrap: wrap; }
+    .sub-btn { padding: 6px 14px; border-radius: 6px; border: 1px solid var(--border); background: transparent; color: var(--muted); cursor: pointer; transition: .15s; font-size: .83rem; display: flex; align-items: center; gap: 6px; }
+    .sub-btn:hover { background: var(--surface2); color: var(--text); }
+    .sub-btn.on { background: var(--primary); border-color: var(--primary); color: #fff; }
+    .sub-btn .seq-badge { font-size: .68rem; background: rgba(255,255,255,.15); padding: 1px 5px; border-radius: 99px; }
+    .sub-page { display: none; }
+    .sub-page.on { display: block; }
+
+    /* Stats grid */
+    .stats { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px,1fr)); gap: 14px; margin-bottom: 20px; }
+    .stat { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 18px; display: flex; align-items: center; gap: 14px; }
+    .stat-ico { width: 42px; height: 42px; border-radius: 9px; display: flex; align-items: center; justify-content: center; font-size: 1.1rem; flex-shrink: 0; }
+    .ico-blue { background:#1e3a5f; color:var(--info); }
+    .ico-green { background:#14532d; color:var(--success); }
+    .ico-purple { background:#312e81; color:var(--primary-h); }
+    .ico-orange { background:#431407; color:var(--warn); }
+    .ico-teal { background:#134e4a; color:#2dd4bf; }
+    .stat-num { font-size: 1.6rem; font-weight: 700; line-height: 1; }
+    .stat-lbl { font-size: .78rem; color: var(--muted); }
+
+    /* Panel */
+    .panel { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 18px; margin-bottom: 18px; }
+    .panel-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 14px; flex-wrap: wrap; gap: 8px; font-weight: 600; }
+
+    /* Console */
+    #console { background: #0a0c14; border: 1px solid var(--border); border-radius: 7px; padding: 12px; height: 260px; overflow-y: auto; font-family: 'JetBrains Mono', monospace; font-size: .76rem; line-height: 1.7; }
+    .log-sys { color: #4b5563; } .log-info { color: var(--info); } .log-ok { color: var(--success); } .log-err { color: var(--danger); } .log-warn { color: var(--warn); }
+
+    /* Split layout */
+    .split { display: grid; grid-template-columns: 340px 1fr; gap: 16px; align-items: start; }
+    @media(max-width:860px) { .split { grid-template-columns: 1fr; } }
+
+    /* Form */
+    .form { display: flex; flex-direction: column; gap: 12px; }
+    .field { display: flex; flex-direction: column; gap: 4px; }
+    .field label { font-size: .8rem; color: var(--muted); font-weight: 500; }
+    input[type=text], input[type=number], select, textarea {
+      background: var(--bg); border: 1px solid var(--border); color: var(--text);
+      padding: 8px 11px; border-radius: 7px; width: 100%; outline: none; transition: border-color .15s;
+    }
+    input:focus, select:focus, textarea:focus { border-color: var(--primary); }
+    textarea { resize: vertical; }
+    .hint { font-size: .73rem; color: var(--muted); }
+
+    /* Day checkboxes */
+    .days { display: flex; flex-wrap: wrap; gap: 6px; }
+    .days label { display: flex; align-items: center; gap: 4px; padding: 4px 9px; border-radius: 5px; background: var(--surface2); border: 1px solid var(--border); cursor: pointer; font-size: .8rem; color: var(--text); transition: .15s; }
+    .days label:has(input:checked) { background: var(--primary); border-color: var(--primary); color: #fff; }
+    .days input { display: none; }
+
+    /* Buttons */
+    .btn { display: inline-flex; align-items: center; gap: 7px; padding: 8px 15px; border-radius: 8px; border: 1px solid transparent; cursor: pointer; transition: .15s; white-space: nowrap; font-size: .86rem; }
+    .btn-full { width: 100%; justify-content: center; }
+    .btn-sm { padding: 5px 11px; font-size: .78rem; }
+    .btn-row { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 4px; }
+    .btn-primary { background: var(--primary); color: #fff; border-color: var(--primary); }
+    .btn-primary:hover { background: var(--primary-h); }
+    .btn-success { background: var(--success); color: #000; }
+    .btn-success:hover { filter: brightness(1.1); }
+    .btn-info { background: var(--info); color: #000; }
+    .btn-info:hover { filter: brightness(1.1); }
+    .btn-danger { background: var(--danger); color: #fff; }
+    .btn-danger:hover { filter: brightness(1.1); }
+    .btn-ghost { background: transparent; border: 1px solid var(--border); color: var(--muted); }
+    .btn-ghost:hover { background: var(--surface2); color: var(--text); }
+    .btn-validate { background: var(--warn); color: #000; border-color: var(--warn); font-weight: 600; }
+    .btn-validate:hover { filter: brightness(1.12); }
+
+    /* Table */
+    .tbl-wrap { overflow-x: auto; }
+    table { width: 100%; border-collapse: collapse; font-size: .83rem; }
+    th, td { padding: 9px 11px; text-align: left; border-bottom: 1px solid var(--border); }
+    th { color: var(--muted); font-size: .75rem; text-transform: uppercase; letter-spacing: .04em; font-weight: 600; }
+    tr:hover td { background: var(--surface2); }
+    .btn-edit { background: transparent; border: 1px solid var(--border); color: var(--primary-h); margin-right: 4px; }
+    .btn-edit:hover { background: rgba(99,102,241,.15); border-color: var(--primary); }
+
+    /* Badges */
+    .badge { display: inline-block; font-size: .7rem; padding: 2px 7px; border-radius: 99px; font-weight: 600; margin: 1px; }
+    .b-pagi { background: rgba(99,102,241,.2); color: var(--primary-h); }
+    .b-siang { background: rgba(56,189,248,.2); color: var(--info); }
+    .b-umum { background: rgba(148,163,184,.15); color: var(--muted); }
+    .b-olahraga { background: rgba(34,197,94,.15); color: var(--success); }
+    .b-produktif { background: rgba(245,158,11,.15); color: var(--warn); }
+
+    /* JP progress bar */
+    .jp-bar-wrap { display: flex; align-items: center; gap: 8px; }
+    .jp-bar { height: 6px; border-radius: 99px; background: var(--surface2); flex: 1; overflow: hidden; }
+    .jp-bar-fill { height: 100%; border-radius: 99px; background: var(--primary); transition: width .3s; }
+    .jp-bar-fill.warn { background: var(--warn); }
+    .jp-bar-fill.danger { background: var(--danger); }
+    .jp-label { font-size: .75rem; color: var(--muted); white-space: nowrap; }
+
+    /* Coverage table */
+    .cov-grid { display: grid; grid-template-columns: auto repeat(6, 1fr); gap: 4px; margin-top: 12px; font-size: .78rem; }
+    .cov-cell { padding: 6px 8px; border-radius: 5px; text-align: center; font-weight: 600; }
+    .cov-head { color: var(--muted); font-size: .7rem; text-transform: uppercase; letter-spacing: .04em; }
+    .cov-ok   { background: rgba(34,197,94,.12);  color: var(--success); border: 1px solid rgba(34,197,94,.25); }
+    .cov-warn { background: rgba(245,158,11,.12); color: var(--warn);    border: 1px solid rgba(245,158,11,.25); }
+    .cov-label { display: flex; align-items: center; justify-content: flex-end; padding-right: 8px; color: var(--muted); font-weight: 500; }
+
+    /* Timetable grid */
+    .tt-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px,1fr)); gap: 14px; }
+    .day-card { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; overflow: hidden; }
+    .day-card h4 { padding: 9px 13px; background: var(--surface2); font-size: .83rem; border-bottom: 1px solid var(--border); }
+    .slot { padding: 8px 13px; border-bottom: 1px solid var(--border); position: relative; }
+    .slot:last-child { border-bottom: none; }
+    .slot.pagi { border-left: 3px solid var(--primary); }
+    .slot.siang { border-left: 3px solid var(--info); }
+    .slot.fb { border-left: 3px solid var(--warn); background: rgba(245,158,11,.05); }
+    .slot.kosong { opacity: .4; }
+    .slot-top { font-size: .69rem; color: var(--muted); display: flex; justify-content: space-between; }
+    .slot-mapel { font-weight: 600; font-size: .81rem; margin: 2px 0; }
+    .slot-guru { font-size: .74rem; color: var(--muted); }
+    .badge-fb { position: absolute; top: 5px; right: 7px; background: var(--warn); color: #000; font-size: .6rem; padding: 1px 5px; border-radius: 99px; font-weight: 700; }
+
+    /* Filter legend */
+    .filter-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+    .legend { display: flex; align-items: center; gap: 12px; font-size: .78rem; color: var(--muted); flex-wrap: wrap; }
+    .dot { display: inline-block; width: 9px; height: 9px; border-radius: 50%; margin-right: 3px; vertical-align: middle; }
+    .dot-pagi { background: var(--primary); } .dot-siang { background: var(--info); } .dot-fb { background: var(--warn); }
+
+    /* Empty state */
+    .empty { text-align: center; padding: 50px 20px; color: var(--muted); }
+    .empty i { font-size: 2.8rem; display: block; margin-bottom: 12px; }
+
+    /* Loading overlay */
+    #overlay { position: fixed; inset: 0; background: rgba(0,0,0,.65); display: flex; align-items: center; justify-content: center; z-index: 999; backdrop-filter: blur(3px); }
+    .spin-wrap { text-align: center; }
+    .spinner { width: 42px; height: 42px; border: 3px solid var(--border); border-top-color: var(--primary); border-radius: 50%; animation: spin .7s linear infinite; margin: 0 auto 12px; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    #overlay-txt { color: var(--text); font-size: .9rem; }
+
+    /* Modals */
+    #modal-validate, #modal-edit, #modal-detail-mapel, #modal-add, #modal-generate-failed, #modal-copy-alokasi {
+      position: fixed; inset: 0; background: rgba(0,0,0,.72); display: flex;
+      align-items: center; justify-content: center; z-index: 1000;
+      backdrop-filter: blur(4px); padding: 20px;
+    }
+    .modal-box {
+      background: var(--surface); border: 1px solid var(--border); border-radius: 14px;
+      width: 100%; max-width: 780px; max-height: 85vh; display: flex; flex-direction: column;
+      box-shadow: 0 24px 80px rgba(0,0,0,.5);
+    }
+    #modal-edit .modal-box, #modal-detail-mapel .modal-box, #modal-add .modal-box { max-width: 780px; }
+    #modal-edit.modal-large .modal-box, #modal-add.modal-large .modal-box, #modal-guru-mutlak-detail .modal-box, #modal-teacher-jp-restriction .modal-box { max-width: 1000px; width: 95%; }
+    #modal-guru-mutlak-detail, #modal-teacher-jp-restriction {
+      position: fixed; inset: 0; background: rgba(0,0,0,.72); display: flex;
+      align-items: center; justify-content: center; z-index: 1010;
+      backdrop-filter: blur(4px); padding: 20px;
+    }
+    .modal-head { padding: 18px 22px; border-bottom: 1px solid var(--border); display: flex; align-items: center; justify-content: space-between; }
+    .modal-head h3 { font-size: 1.05rem; font-weight: 700; display: flex; align-items: center; gap: 9px; }
+    .modal-body { overflow-y: auto; padding: 20px 22px; flex: 1; }
+    .modal-foot { padding: 14px 22px; border-top: 1px solid var(--border); display: flex; gap: 10px; justify-content: flex-end; }
+    .val-stats { display: grid; grid-template-columns: repeat(auto-fill, minmax(130px,1fr)); gap: 10px; margin-bottom: 18px; }
+    .val-stat { background: var(--surface2); border: 1px solid var(--border); border-radius: 8px; padding: 12px 14px; }
+    .val-stat-num { font-size: 1.5rem; font-weight: 700; line-height: 1; }
+    .val-stat-lbl { font-size: .74rem; color: var(--muted); margin-top: 2px; }
+    .val-section { margin-bottom: 14px; }
+    .val-section h4 { font-size: .83rem; font-weight: 700; margin-bottom: 8px; display: flex; align-items: center; gap: 6px; }
+    .val-list { list-style: none; display: flex; flex-direction: column; gap: 5px; }
+    .val-list li { padding: 8px 12px; border-radius: 7px; font-size: .8rem; line-height: 1.5; font-family: 'JetBrains Mono', monospace; }
+    .val-err  { background: rgba(239,68,68,.12);  border-left: 3px solid var(--danger); color: #fca5a5; }
+    .val-warn { background: rgba(245,158,11,.1);  border-left: 3px solid var(--warn);   color: #fcd34d; }
+    .val-sum  { background: rgba(148,163,184,.07); border-left: 3px solid var(--border); color: var(--muted); }
+    .val-ok   { background: rgba(34,197,94,.1);   border-left: 3px solid var(--success); color: #86efac; }
+
+    /* ── Health Check ─────────────────────────────── */
+    .health-status-ok   { background: rgba(34,197,94,.12);  border: 1px solid rgba(34,197,94,.3);  color: var(--success); }
+    .health-status-warn { background: rgba(245,158,11,.12); border: 1px solid rgba(245,158,11,.3); color: var(--warn); }
+    .health-status-err  { background: rgba(239,68,68,.12);  border: 1px solid rgba(239,68,68,.3);  color: var(--danger); }
+
+    .health-banner {
+      display: flex; align-items: center; gap: 14px; padding: 13px 16px; border-radius: 9px;
+      font-size: .88rem; font-weight: 600;
+    }
+    .health-banner i { font-size: 1.3rem; flex-shrink: 0; }
+    .health-banner-txt { flex: 1; }
+    .health-banner-txt small { font-weight: 400; font-size: .78rem; opacity: .85; display: block; margin-top: 1px; }
+    .health-counters { display: flex; gap: 10px; flex-shrink: 0; }
+    .hc-badge { padding: 4px 10px; border-radius: 6px; font-size: .78rem; font-weight: 700; }
+    .hc-err  { background: rgba(239,68,68,.25);  color: #fca5a5; }
+    .hc-warn { background: rgba(245,158,11,.2);  color: #fcd34d; }
+    .hc-ok   { background: rgba(34,197,94,.2);   color: #86efac; }
+
+    .issue-groups { display: flex; flex-direction: column; gap: 10px; }
+    .issue-group { border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
+    .issue-group-head {
+      display: flex; align-items: center; gap: 10px; padding: 10px 14px;
+      background: var(--surface2); cursor: pointer; user-select: none;
+      transition: background .15s; font-size: .84rem; font-weight: 600;
+    }
+    .issue-group-head:hover { background: var(--border); }
+    .issue-group-head .ig-icon { font-size: .95rem; width: 20px; text-align: center; }
+    .issue-group-head .ig-count {
+      margin-left: auto; font-size: .72rem; font-weight: 700;
+      padding: 2px 8px; border-radius: 99px;
+    }
+    .ig-count-err  { background: rgba(239,68,68,.25);  color: #fca5a5; }
+    .ig-count-warn { background: rgba(245,158,11,.2);  color: #fcd34d; }
+    .ig-count-ok   { background: rgba(34,197,94,.2);   color: #86efac; }
+    .ig-chevron { color: var(--muted); transition: transform .2s; font-size: .75rem; }
+    .ig-chevron.open { transform: rotate(90deg); }
+
+    .issue-group-body { display: none; padding: 0; }
+    .issue-group-body.open { display: block; }
+    .issue-item {
+      display: flex; align-items: flex-start; gap: 10px;
+      padding: 9px 14px; border-top: 1px solid var(--border);
+      font-size: .8rem; line-height: 1.5;
+    }
+    .issue-item:hover { background: rgba(255,255,255,.025); }
+    .issue-item-ico { flex-shrink: 0; width: 18px; text-align: center; margin-top: 1px; font-size: .8rem; }
+    .issue-item-body { flex: 1; min-width: 0; }
+    .issue-item-body strong { display: block; font-weight: 600; }
+    .issue-item-body span { color: var(--muted); font-size: .76rem; }
+    .issue-item-badge { padding: 2px 7px; border-radius: 5px; font-size: .68rem; font-weight: 700; white-space: nowrap; flex-shrink: 0; margin-top: 2px; }
+    .ib-err  { background: rgba(239,68,68,.2);  color: #fca5a5; }
+    .ib-warn { background: rgba(245,158,11,.15); color: #fcd34d; }
+    .ib-hint { background: rgba(56,189,248,.12); color: var(--info); }
+
+    .guru-main-row { cursor: pointer; }
+    .guru-main-row:hover td { background: var(--surface2); }
+    .guru-detail-row td { padding: 0 !important; border-bottom: 1px solid var(--border); background: #0d1020; }
+    .guru-detail-inner { padding: 14px 16px 16px; display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 16px; }
+    .guru-detail-section h5 { font-size: .72rem; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); margin-bottom: 7px; font-weight: 600; }
+    .day-chip { display: inline-flex; align-items: center; gap: 3px; padding: 3px 8px; border-radius: 5px; font-size: .75rem; font-weight: 600; margin: 2px; }
+    .day-chip-pagi  { background: rgba(99,102,241,.18); color: var(--primary-h); border: 1px solid rgba(99,102,241,.3); }
+    .day-chip-siang { background: rgba(56,189,248,.15); color: var(--info); border: 1px solid rgba(56,189,248,.3); }
+    .day-chip-off   { background: rgba(148,163,184,.08); color: #4b5563; border: 1px solid var(--border); text-decoration: line-through; }
+    .mapel-chip { display: inline-flex; align-items: center; gap: 4px; padding: 3px 9px; border-radius: 5px; font-size: .74rem; margin: 2px; background: rgba(34,197,94,.1); color: var(--success); border: 1px solid rgba(34,197,94,.2); }
+    .no-mapel { font-size: .78rem; color: var(--muted); font-style: italic; }
+    .chevron-btn { background: none; border: none; color: var(--muted); cursor: pointer; padding: 2px 5px; transition: transform .2s, color .2s; }
+    .chevron-btn.open { transform: rotate(90deg); color: var(--primary-h); }
+
+    /* Split report layout */
+    .split-report { display: grid; grid-template-columns: 280px 1fr; gap: 16px; align-items: start; }
+    @media(max-width:860px) { .split-report { grid-template-columns: 1fr; } }
+
+    /* Teacher report stats card */
+    .report-stat-card {
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 12px 14px;
+    }
+    
+    /* Feasibility analysis layout */
+    .feasibility-grid {
+      display: grid;
+      grid-template-columns: repeat(6, 1fr);
+      gap: 12px;
+      margin-bottom: 20px;
+    }
+    @media(max-width: 768px) {
+      .feasibility-grid {
+        grid-template-columns: repeat(3, 1fr);
+      }
+    }
+    .feasibility-cell {
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 14px;
+      text-align: center;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+    .feasibility-cell:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 4px 12px rgba(0,0,0,0.25);
+      border-color: var(--primary);
+    }
+    .feasibility-cell.cell-red {
+      background: rgba(239, 68, 68, 0.12);
+      border-color: rgba(239, 68, 68, 0.4);
+      color: #fca5a5;
+    }
+    .feasibility-cell.cell-red:hover {
+      border-color: var(--danger);
+    }
+    .feasibility-cell.cell-yellow {
+      background: rgba(245, 158, 11, 0.12);
+      border-color: rgba(245, 158, 11, 0.4);
+      color: #fcd34d;
+    }
+    .feasibility-cell.cell-yellow:hover {
+      border-color: var(--warn);
+    }
+    .feasibility-cell.cell-green {
+      background: rgba(34, 197, 94, 0.12);
+      border-color: rgba(34, 197, 94, 0.4);
+      color: #86efac;
+    }
+    .feasibility-cell.cell-green:hover {
+      border-color: var(--success);
+    }
+    .feasibility-cell.active-cell {
+      outline: 2px solid var(--primary);
+      outline-offset: 2px;
+    }
+    .feasibility-cell-day {
+      font-size: 0.8rem;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      opacity: 0.8;
+      margin-bottom: 4px;
+      font-weight: 600;
+    }
+    .feasibility-cell-val {
+      font-size: 1.3rem;
+      font-weight: 700;
+      line-height: 1.2;
+    }
+    .feasibility-cell-sub {
+      font-size: 0.7rem;
+      margin-top: 4px;
+      opacity: 0.85;
+    }
+    
+    .feasibility-split {
+      display: grid;
+      grid-template-columns: 1fr 340px;
+      gap: 16px;
+      align-items: start;
+    }
+    @media(max-width: 900px) {
+      .feasibility-split {
+        grid-template-columns: 1fr;
+      }
+    }
+
+    /* ── Daftar Guru Mutlak Custom CSS ──────────────── */
+    .mutlak-table {
+      border-collapse: collapse;
+      width: 100%;
+      margin-top: 10px;
+    }
+    .mutlak-table th {
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      padding: 10px 12px;
+      font-weight: 600;
+      color: var(--muted);
+      font-size: .75rem;
+      text-transform: uppercase;
+      letter-spacing: .04em;
+    }
+    .mutlak-table td {
+      border: 1px solid var(--border);
+      padding: 10px 12px;
+      vertical-align: middle;
+      font-size: .83rem;
+    }
+    .mutlak-table tr:hover td {
+      background: transparent; /* Disable generic hover bg on rowspan tables to avoid glitches */
+    }
+    .mutlak-table tr.hoverable-row:hover td {
+      background: var(--surface2);
+    }
+    .mutlak-table td.detail-cell:hover {
+      background: var(--surface2);
+    }
+    .btn-plus-round {
+      width: 25px;
+      height: 25px;
+      border-radius: 50%;
+      background: var(--success);
+      color: #000;
+      border: none;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      font-weight: 700;
+      font-size: 1.05rem;
+      margin-left: 10px;
+      transition: transform 0.15s, background-color 0.15s;
+      vertical-align: middle;
+      box-shadow: 0 2px 6px rgba(34,197,94,0.3);
+    }
+    .btn-plus-round:hover {
+      transform: scale(1.15);
+      background-color: #4ade80;
+    }
+    .btn-trash-instant {
+      background: none;
+      border: none;
+      cursor: pointer;
+      color: var(--danger);
+      padding: 4px 6px;
+      border-radius: 4px;
+      transition: background-color 0.12s;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      vertical-align: middle;
+    }
+    .btn-trash-instant:hover {
+      background: rgba(239, 68, 68, 0.15);
+    }
+    .inline-add-row td {
+      background: rgba(34, 197, 94, 0.04) !important;
+      border-top: 1px dashed rgba(34, 197, 94, 0.4);
+      border-bottom: 1px dashed rgba(34, 197, 94, 0.4);
+    }
+    .inline-add-row select, .inline-add-row input {
+      background: var(--bg);
+      border: 1px solid var(--border);
+      color: var(--text);
+      padding: 5px 8px;
+      border-radius: 6px;
+      font-size: 0.8rem;
+      outline: none;
+      transition: border-color 0.15s;
+    }
+    .inline-add-row select:focus, .inline-add-row input:focus {
+      border-color: var(--success);
+    }
+    .btn-inline-action {
+      background: transparent;
+      border: none;
+      cursor: pointer;
+      padding: 5px 7px;
+      font-size: 0.85rem;
+      border-radius: 4px;
+      transition: background-color 0.12s;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .btn-inline-save { color: var(--success); }
+    .btn-inline-save:hover { background: rgba(34, 197, 94, 0.15); }
+    .btn-inline-cancel { color: var(--muted); }
+    .btn-inline-cancel:hover { background: rgba(255, 255, 255, 0.08); }
+    .btn-inline-delete { color: var(--danger); }
+    .btn-inline-delete:hover { background: rgba(239, 68, 68, 0.15); }
+  </style>
+</head>
+<body>
+
+<div id="app">
+
+  <!-- Sidebar -->
+  <aside id="sidebar">
+    <div class="sidebar-toggle" id="sidebar-toggle">
+      <i class="fa-solid fa-chevron-left"></i>
+    </div>
+    <div class="brand">
+      <i class="fa-solid fa-calendar-days"></i>
+      <div class="brand-text"><strong>SITAB</strong><small>Timetable Generator</small></div>
+    </div>
+
+    <button class="nav-item on" data-page="pg-dashboard"><i class="fa-solid fa-gauge-high"></i> <span class="nav-text">Dashboard</span></button>
+    <button class="nav-item" data-page="pg-timetable"><i class="fa-solid fa-table-cells-large"></i> <span class="nav-text">Grid Jadwal</span></button>
+    <button class="nav-item" data-page="pg-master"><i class="fa-solid fa-database"></i> <span class="nav-text">Data Master</span></button>
+    <button class="nav-item" data-page="pg-settings"><i class="fa-solid fa-sliders"></i> <span class="nav-text">Pengaturan</span></button>
+    <button class="nav-item" data-page="pg-report"><i class="fa-solid fa-chalkboard-user"></i> <span class="nav-text">Laporan Guru</span></button>
+    <button class="nav-item" data-page="pg-alloc"><i class="fa-solid fa-list-check"></i> <span class="nav-text">Ringkasan Alokasi</span></button>
+    <button class="nav-item" data-page="pg-feasibility"><i class="fa-solid fa-triangle-exclamation"></i> <span class="nav-text">Peta Kelayakan</span></button>
+    <button class="nav-item" data-page="pg-guru-mutlak"><i class="fa-solid fa-lock"></i> <span class="nav-text">Daftar Guru Mutlak</span></button>
+
+    <div class="sidebar-foot">
+      <button class="nav-item" id="btn-fullscreen">
+        <i class="fa-solid fa-expand"></i> <span class="nav-text">Fullscreen</span>
+      </button>
+    </div>
+  </aside>
+
+  <!-- Main -->
+  <div id="main">
+
+    <!-- Topbar -->
+    <div id="topbar">
+      <div>
+        <div style="display: flex; align-items: center; gap: 12px; flex-wrap: wrap;">
+          <h2 id="page-title">Dashboard</h2>
+          <button id="btn-branch-switch" class="btn btn-sm" style="border-radius: 20px; font-weight: 600; padding: 4px 12px; background: rgba(99,102,241,0.15); color: var(--primary-h); border: 1px solid var(--primary); cursor: pointer; display: flex; align-items: center; gap: 6px; transition: .15s;">
+            <i class="fa-solid fa-school"></i> Cabang: <span id="active-branch-label">Bekasi</span> <i class="fa-solid fa-arrow-right-arrow-left" style="font-size: 0.75rem;"></i>
+          </button>
+        </div>
+        <p id="page-desc">Ringkasan sistem jadwal Anda.</p>
+      </div>
+      <div class="topbar-btns">
+        <button class="btn btn-primary" id="btn-generate"><i class="fa-solid fa-bolt"></i> Generate Jadwal</button>
+        <button class="btn btn-validate" id="btn-validate"><i class="fa-solid fa-shield-halved"></i> Validasi Data</button>
+        <input type="file" id="input-excel" accept=".xlsx" style="display:none">
+        <button class="btn btn-warn" id="btn-upload-excel" style="background:var(--warn);color:#000;border-color:var(--warn)"><i class="fa-solid fa-file-excel"></i> Upload Excel</button>
+        <button class="btn btn-success" id="btn-download-excel-top"><i class="fa-solid fa-file-excel"></i> Download Excel Jadwal</button>
+        <button class="btn btn-danger"  id="btn-reset-jadwal"><i class="fa-solid fa-trash-can"></i> Reset Jadwal</button>
+      </div>
+    </div>
+
+    <!-- Content -->
+    <div id="content">
+
+      <!-- Dashboard -->
+      <div class="page on" id="pg-dashboard">
+        <div class="stats">
+          <div class="stat"><div class="stat-ico ico-blue"><i class="fa-solid fa-chalkboard-user"></i></div>
+            <div><div class="stat-num" id="s-teachers">0</div><div class="stat-lbl">Total Guru</div></div></div>
+          <div class="stat"><div class="stat-ico ico-green"><i class="fa-solid fa-school"></i></div>
+            <div><div class="stat-num" id="s-classes">0</div><div class="stat-lbl">Rombel Kelas</div></div></div>
+          <div class="stat"><div class="stat-ico ico-teal"><i class="fa-solid fa-book"></i></div>
+            <div><div class="stat-num" id="s-subjects">0</div><div class="stat-lbl">Mata Pelajaran</div></div></div>
+          <div class="stat"><div class="stat-ico ico-purple"><i class="fa-solid fa-link"></i></div>
+            <div><div class="stat-num" id="s-ts">0</div><div class="stat-lbl">Penugasan Guru</div></div></div>
+          <div class="stat"><div class="stat-ico ico-orange"><i class="fa-solid fa-triangle-exclamation"></i></div>
+            <div><div class="stat-num" id="s-warn">0</div><div class="stat-lbl">Substitusi</div></div></div>
+        </div>
+
+        <!-- Health Check Panel -->
+        <div class="panel" id="health-panel">
+          <div class="panel-head">
+            <span id="health-title"><i class="fa-solid fa-heart-pulse"></i> Status Kesiapan Data</span>
+            <button class="btn btn-ghost btn-sm" id="btn-refresh-health"><i class="fa-solid fa-arrows-rotate"></i> Refresh</button>
+          </div>
+          <!-- Status Badge -->
+          <div id="health-status-bar" style="margin-bottom:16px"></div>
+          <!-- Issue Groups -->
+          <div id="health-issues">
+            <div class="empty" style="padding:24px"><i class="fa-solid fa-circle-notch fa-spin"></i><p>Memuat status...</p></div>
+          </div>
+        </div>
+
+        <div class="panel">
+          <div class="panel-head">
+            <span><i class="fa-solid fa-terminal"></i> Konsol Log</span>
+            <button class="btn btn-ghost btn-sm" id="btn-clrlog"><i class="fa-solid fa-trash"></i> Bersihkan</button>
+          </div>
+          <div id="console"><div class="log-sys">[SYSTEM] SITAB siap. Selamat datang!</div></div>
+        </div>
+      </div>
+
+      <!-- Grid Jadwal -->
+      <div class="page" id="pg-timetable">
+        <div class="panel">
+          <div class="panel-head">
+            <div class="filter-row">
+              <label><i class="fa-solid fa-filter"></i> Kelas:</label>
+              <select id="filter-class" style="width:240px"><option value="">— Pilih Kelas —</option></select>
+            </div>
+            <div class="legend">
+              <span><span class="dot dot-pagi"></span>Pagi</span>
+              <span><span class="dot dot-siang"></span>Siang</span>
+              <span><span class="dot dot-fb"></span>Substitusi</span>
+            </div>
+          </div>
+          <div id="tt-empty" class="empty"><i class="fa-solid fa-calendar-xmark"></i><p>Belum ada jadwal. Generate dulu.</p></div>
+          <div id="tt-grid" class="tt-grid" style="display:none"></div>
+        </div>
+
+        <!-- Panel Guru Tidak Mendapat Jam -->
+        <div class="panel" id="panel-idle-teachers" style="display:none; margin-top:20px;">
+          <div class="panel-head" style="margin-bottom: 10px;">
+            <span style="color:var(--danger); font-weight:600;"><i class="fa-solid fa-user-slash"></i> Guru yang Tidak Mendapat Jam Mengajar</span>
+          </div>
+          <div id="idle-teachers-list" style="display:flex; flex-wrap:wrap; gap:8px;"></div>
+        </div>
+      </div>
+
+      <!-- Data Master -->
+      <div class="page" id="pg-master">
+        <div class="sub-nav">
+          <button class="sub-btn on" data-sub="sub-guru"><span class="seq-badge">1</span> Guru</button>
+          <button class="sub-btn" data-sub="sub-kelas"><span class="seq-badge">2</span> Kelas</button>
+          <button class="sub-btn" data-sub="sub-mapel"><span class="seq-badge">3</span> Mata Pelajaran</button>
+          <button class="sub-btn" data-sub="sub-alokasi"><span class="seq-badge">4</span> Alokasi Kurikulum</button>
+        </div>
+
+        <!-- Scripts moved to app.js -->
+
+        <!-- Sub 1: Guru -->
+        <div class="sub-page on" id="sub-guru">
+          <div class="panel">
+            <div class="panel-head">
+              <span>Daftar Guru</span>
+              <div style="display: flex; gap: 8px; align-items: center; flex-wrap: wrap;">
+                <input type="text" id="search-guru" placeholder="Cari guru..." style="width: 180px; padding: 6px 10px; font-size: 0.8rem; background: var(--bg); border: 1px solid var(--border); color: var(--text); border-radius: 6px; outline: none;" />
+                <input type="file" id="input-excel-guru" accept=".xlsx" style="display:none">
+                <button class="btn btn-warn btn-sm" id="btn-upload-excel-guru" style="background:var(--warn);color:#000;border-color:var(--warn)"><i class="fa-solid fa-file-excel"></i> Upload Excel Guru</button>
+                <button class="btn btn-primary btn-sm" id="btn-add-guru-trigger"><i class="fa-solid fa-plus"></i> Tambah Guru</button>
+              </div>
+            </div>
+            <div class="tbl-wrap">
+              <table id="tbl-guru">
+                <thead><tr><th></th><th>Kode</th><th>Nama</th><th>Shift</th><th>Mapel Diajarkan</th><th></th></tr></thead>
+                <tbody></tbody>
+              </table>
+              <p id="tbl-guru-empty" class="text-muted" style="text-align:center;padding:20px;display:none">Belum ada guru.</p>
+            </div>
+          </div>
+        </div>
+
+        <!-- Sub 2: Kelas -->
+        <div class="sub-page" id="sub-kelas">
+          <div class="panel">
+            <div class="panel-head">
+              <span>Daftar Kelas</span>
+              <div style="display: flex; gap: 8px; align-items: center;">
+                <input type="text" id="search-kelas" placeholder="Cari kelas..." style="width: 180px; padding: 6px 10px; font-size: 0.8rem; background: var(--bg); border: 1px solid var(--border); color: var(--text); border-radius: 6px; outline: none;" />
+                <button class="btn btn-primary btn-sm" id="btn-add-kelas-trigger"><i class="fa-solid fa-plus"></i> Tambah Kelas</button>
+              </div>
+            </div>
+            <div class="tbl-wrap">
+              <table id="tbl-kelas">
+                <thead><tr><th>Nama Kelas</th><th>Shift</th><th>Tingkat</th><th>Jurusan</th><th></th></tr></thead>
+                <tbody></tbody>
+              </table>
+              <p id="tbl-kelas-empty" class="text-muted" style="text-align:center;padding:20px;display:none">Belum ada kelas.</p>
+            </div>
+          </div>
+        </div>
+
+        <!-- Sub 3: Mapel -->
+        <div class="sub-page" id="sub-mapel">
+          <div class="panel">
+            <div class="panel-head">
+              <span>Daftar Mata Pelajaran</span>
+              <div style="display: flex; gap: 8px; align-items: center; flex-wrap: wrap;">
+                <input type="text" id="search-mapel" placeholder="Cari mapel..." style="width: 180px; padding: 6px 10px; font-size: 0.8rem; background: var(--bg); border: 1px solid var(--border); color: var(--text); border-radius: 6px; outline: none;" />
+                <input type="file" id="input-excel-mapel" accept=".xlsx" style="display:none">
+                <button class="btn btn-warn btn-sm" id="btn-upload-excel-mapel" style="background:var(--warn);color:#000;border-color:var(--warn)"><i class="fa-solid fa-file-excel"></i> Upload Excel Mapel</button>
+                <button class="btn btn-primary btn-sm" id="btn-add-mapel-trigger"><i class="fa-solid fa-plus"></i> Tambah Mapel</button>
+              </div>
+            </div>
+            <div class="tbl-wrap">
+              <table id="tbl-mapel">
+                <thead><tr><th>Nama Mapel</th><th>Kategori</th><th>Tingkat</th><th>Jurusan</th><th></th></tr></thead>
+                <tbody></tbody>
+              </table>
+              <p id="tbl-mapel-empty" class="text-muted" style="text-align:center;padding:20px;display:none">Belum ada mata pelajaran.</p>
+            </div>
+          </div>
+        </div>
+
+        <!-- Sub 4: Alokasi Kurikulum (TANPA guru) -->
+        <div class="sub-page" id="sub-alokasi">
+          <div class="panel">
+            <div class="panel-head">
+              <span>Alokasi per Kelas</span>
+              <div style="display:flex; gap:8px; align-items:center;">
+                <select id="filter-alokasi-kelas" style="width:180px"><option value="">Semua Kelas</option></select>
+                <button class="btn btn-primary btn-sm" id="btn-add-alokasi-trigger"><i class="fa-solid fa-plus"></i> Tambah Alokasi</button>
+                <button class="btn btn-info btn-sm" id="btn-copy-alokasi-trigger"><i class="fa-solid fa-copy"></i> Salin Alokasi</button>
+              </div>
+            </div>
+            <div id="jp-summary" style="margin-bottom:12px"></div>
+            <div class="tbl-wrap">
+              <table id="tbl-alokasi">
+                <thead><tr><th>Kelas</th><th>Mata Pelajaran</th><th>JP/Minggu</th><th>Guru Mutlak</th><th></th></tr></thead>
+                <tbody></tbody>
+              </table>
+            </div>
+          </div>
+
+          <div class="panel">
+            <h3 style="margin-bottom:10px; color: var(--primary)"><i class="fa-solid fa-lock"></i> Daftar Guru Mutlak</h3>
+            <p class="hint" style="margin-bottom:12px">Daftar kelas dan mapel yang sudah dikunci secara mutlak ke guru tertentu.</p>
+            <div class="tbl-wrap">
+              <table id="tbl-guru-mutlak">
+                <thead><tr><th>Nama Guru Mutlak</th><th>Kelas</th><th>Mata Pelajaran</th><th>JP/Minggu</th></tr></thead>
+                <tbody></tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+
+
+
+      </div><!-- /pg-master -->
+
+      <!-- Pengaturan -->
+      <div class="page" id="pg-settings">
+        <div class="panel" style="max-width:680px">
+          <h3 style="margin-bottom:16px"><i class="fa-brands fa-google-drive"></i> Konfigurasi Google Sheets API</h3>
+          <form class="form" id="form-settings">
+            <div class="field">
+              <label>Spreadsheet ID</label>
+              <input id="cfg-sid" type="text" placeholder="ID dari URL Google Sheets">
+              <span class="hint">URL: https://docs.google.com/spreadsheets/d/<strong>[ID INI]</strong>/edit</span>
+            </div>
+            <div class="field">
+              <label>Service Account Credentials (JSON)</label>
+              <textarea id="cfg-creds" rows="9" placeholder="Paste isi file JSON Service Account di sini"></textarea>
+              <span class="hint">Share spreadsheet ke email Service Account sebagai Editor.</span>
+            </div>
+            <div class="btn-row">
+              <button type="submit" class="btn btn-primary"><i class="fa-solid fa-floppy-disk"></i> Simpan</button>
+              <a href="/api/template" class="btn btn-ghost"><i class="fa-solid fa-file-excel"></i> Download Template Excel</a>
+            </div>
+          </form>
+          <hr class="sep"/>
+          <h4 style="margin-bottom:8px"><i class="fa-solid fa-user-check"></i> Atur Ketersediaan Semua Guru</h4>
+          <p class="text-muted" style="font-size:.82rem;margin-bottom:10px">Mengatur seluruh guru agar bisa mengajar di semua hari (Senin - Sabtu) dan semua shift (Pagi & Siang).</p>
+          <button class="btn btn-success" id="btn-set-all-teachers-availability"><i class="fa-solid fa-check-double"></i> Atur Semua Guru Bisa Mengajar Semua Hari & Shift</button>
+          <hr class="sep">
+          <h4 class="text-danger" style="margin-bottom:8px"><i class="fa-solid fa-trash"></i> Hapus Semua Data</h4>
+          <p class="text-muted" style="font-size:.82rem;margin-bottom:10px">Menghapus semua guru, kelas, mapel, alokasi, penugasan, dan jadwal. Tidak bisa dibatalkan.</p>
+          <button class="btn btn-danger" id="btn-clear"><i class="fa-solid fa-trash-can"></i> Hapus Semua Data</button>
+        </div>
+      </div>
+
+      <!-- Laporan Guru (Rincian per Guru) -->
+      <div class="page" id="pg-report">
+        <div class="split-report">
+          <!-- Left Sidebar Panel -->
+          <div class="panel">
+            <h3 style="margin-bottom:14px"><i class="fa-solid fa-chalkboard-user"></i> Pilih Guru</h3>
+            <div class="field" style="margin-bottom:16px">
+              <label>Guru:</label>
+              <select id="select-report-guru">
+                <option value="">— Pilih Guru —</option>
+              </select>
+            </div>
+            <!-- Dynamic Teacher Info Area -->
+            <div id="report-guru-info" style="display:none">
+              <div class="report-stat-card" style="margin-bottom:12px">
+                <div class="stat-lbl">Kode Guru</div>
+                <div class="stat-num" id="rep-g-kode" style="font-size:1.3rem;font-family:'JetBrains Mono',monospace">-</div>
+              </div>
+              <div class="report-stat-card" style="margin-bottom:12px">
+                <div class="stat-lbl">Total Beban Mengajar</div>
+                <div class="stat-num" id="rep-g-load" style="font-size:1.3rem">-</div>
+                <div class="hint" id="rep-g-target" style="margin-top:2px">Min: - / Max: - JP</div>
+              </div>
+              <div class="report-stat-card" id="rep-g-warn-card" style="margin-bottom:12px; display:none">
+                <div class="stat-lbl">Status Beban</div>
+                <div id="rep-g-warn-badge" style="margin-top:4px"></div>
+              </div>
+              <div class="report-stat-card">
+                <div class="stat-lbl">Shift Mengajar</div>
+                <div id="rep-g-shift" style="margin-top:4px">-</div>
+              </div>
+              <div class="report-stat-card" id="rep-g-mutlak-card" style="margin-top:12px; display:none">
+                <div class="stat-lbl">Terkunci Mutlak Pada:</div>
+                <ul id="rep-g-mutlak-list" class="val-list" style="margin-top:8px; gap:4px;"></ul>
+              </div>
+            </div>
+          </div>
+
+          <!-- Main Report Area -->
+          <div class="panel">
+            <div class="panel-head">
+              <span><i class="fa-solid fa-calendar-check"></i> Jadwal Mengajar Mingguan</span>
+              <div class="legend">
+                <span><span class="dot dot-pagi"></span>Pagi</span>
+                <span><span class="dot dot-siang"></span>Siang</span>
+                <span><span class="dot dot-fb"></span>Substitusi</span>
+              </div>
+            </div>
+            <div id="rep-empty" class="empty-state">
+              <i class="fa-solid fa-chalkboard-user"></i>
+              <p>Pilih guru di sebelah kiri untuk melihat laporan jadwal mengajar.</p>
+            </div>
+            <div id="rep-content" style="display:none">
+              <h4 style="font-size:.9rem;font-weight:600;margin-bottom:10px;"><i class="fa-solid fa-table-cells"></i> Grid Jadwal Guru</h4>
+              <div id="rep-grid" class="tt-grid" style="margin-bottom:24px"></div>
+              <h4 style="font-size:.9rem;font-weight:600;margin-bottom:10px;"><i class="fa-solid fa-list-ol"></i> Rincian Jadwal</h4>
+              <div class="tbl-wrap">
+                <table id="tbl-report-detail">
+                  <thead>
+                    <tr>
+                      <th>Hari</th><th>Jam Ke</th><th>Waktu</th>
+                      <th>Kelas</th><th>Mata Pelajaran</th><th>Status</th>
+                    </tr>
+                  </thead>
+                  <tbody></tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        </div><!-- /split-report -->
+      </div><!-- /pg-report -->
+
+      <!-- Ringkasan Alokasi Semua Guru -->
+      <div class="page" id="pg-alloc">
+        <div class="panel">
+          <div class="panel-head">
+            <span><i class="fa-solid fa-list-check"></i> Ringkasan Alokasi Semua Guru</span>
+            <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+              <input type="text" id="search-summary" placeholder="Cari guru..." style="width:220px;" />
+              <button class="btn btn-success btn-sm" id="btn-download-excel" onclick="downloadTimetableExcel()">
+                <i class="fa-solid fa-file-excel"></i> Download Excel Jadwal
+              </button>
+            </div>
+          </div>
+          <div class="tbl-wrap">
+            <table id="tbl-report-allocations">
+              <thead>
+                <tr>
+                  <th>Guru</th><th>Ketersediaan Shift</th><th>Alokasi Mengajar</th>
+                  <th>Total JP</th><th>Target Beban</th><th>Status</th>
+                </tr>
+              </thead>
+              <tbody></tbody>
+            </table>
+          </div>
+        </div>
+      </div><!-- /pg-alloc -->
+
+      <!-- Peta Kelayakan (Feasibility Analysis) -->
+      <div class="page" id="pg-feasibility">
+        <div class="feasibility-split">
+          
+          <!-- Left: Daily Coverage Map -->
+          <div>
+            <div class="panel">
+              <div class="panel-head">
+                <span><i class="fa-solid fa-calendar-days"></i> Ketersediaan Harian per Shift</span>
+                <span class="hint">Klik sel untuk melihat rincian guru hadir dan libur</span>
+              </div>
+              <h4 style="font-size: 0.85rem; font-weight: 600; color: var(--primary-h); margin-bottom: 8px;">Shift Pagi</h4>
+              <div class="feasibility-grid" id="grid-feasibility-pagi">
+                <!-- Javascript will render pagi cells here -->
+              </div>
+              <h4 style="font-size: 0.85rem; font-weight: 600; color: var(--info); margin-bottom: 8px;">Shift Siang</h4>
+              <div class="feasibility-grid" id="grid-feasibility-siang">
+                <!-- Javascript will render siang cells here -->
+              </div>
+            </div>
+
+            <!-- Subject Capacity Table -->
+            <div class="panel">
+              <div class="panel-head">
+                <span><i class="fa-solid fa-book-open"></i> Analisis Beban &amp; Kapasitas Mengajar Mapel</span>
+              </div>
+              <div class="tbl-wrap">
+                <table id="tbl-feasibility-mapel">
+                  <thead>
+                    <tr>
+                      <th>Nama Mapel</th>
+                      <th>Kategori</th>
+                      <th>Kebutuhan JP</th>
+                      <th>Pengampu</th>
+                      <th>Kapasitas JP</th>
+                      <th>Tingkat Risiko</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <!-- Javascript will render mapel capacity analysis here -->
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+
+          <!-- Right: Daily Teacher Details Panel -->
+          <div class="panel" style="position: sticky; top: 0;">
+            <div class="panel-head">
+              <span><i class="fa-solid fa-chalkboard-user"></i> Rincian Kehadiran Guru</span>
+            </div>
+            <div id="feasibility-detail-empty" class="empty" style="padding: 24px;">
+              <i class="fa-solid fa-mouse-pointer" style="font-size: 2rem;"></i>
+              <p>Pilih hari pada grid ketersediaan di sebelah kiri untuk melihat rincian guru.</p>
+            </div>
+            <div id="feasibility-detail-content" style="display: none;">
+              <h4 id="feasibility-detail-title" style="font-size: 0.9rem; font-weight: 700; color: var(--text); margin-bottom: 12px; border-bottom: 1px solid var(--border); padding-bottom: 6px;">SENIN (PAGI)</h4>
+              
+              <div style="margin-bottom: 16px;">
+                <h5 style="font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.05em; color: var(--success); margin-bottom: 6px; font-weight: 600;">
+                  <i class="fa-solid fa-circle-check"></i> Guru Tersedia (<span id="count-feasibility-hadir">0</span>)
+                </h5>
+                <div id="list-feasibility-hadir" style="display: flex; flex-direction: column; gap: 4px; max-height: 180px; overflow-y: auto;">
+                  <!-- list of present teachers -->
+                </div>
+              </div>
+
+              <div>
+                <h5 style="font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.05em; color: var(--danger); margin-bottom: 6px; font-weight: 600;">
+                  <i class="fa-solid fa-circle-xmark"></i> Guru Libur/Off (<span id="count-feasibility-libur">0</span>)
+                </h5>
+                <div id="list-feasibility-libur" style="display: flex; flex-direction: column; gap: 4px; max-height: 180px; overflow-y: auto;">
+                  <!-- list of absent teachers -->
+                </div>
+              </div>
+            </div>
+          </div>
+
+        </div>
+      </div><!-- /pg-feasibility -->
+
+      <!-- Daftar Guru Mutlak -->
+      <div class="page" id="pg-guru-mutlak">
+        <div class="panel">
+          <div class="panel-head">
+            <span><i class="fa-solid fa-lock"></i> Daftar Guru Mutlak</span>
+            <div style="display: flex; gap: 8px; align-items: center;">
+              <input type="text" id="search-guru-mutlak" placeholder="Cari nama guru..." style="width: 200px; padding: 6px 10px; font-size: 0.8rem; background: var(--bg); border: 1px solid var(--border); color: var(--text); border-radius: 6px; outline: none;" />
+            </div>
+          </div>
+          <div class="tbl-wrap">
+            <table id="tbl-guru-mutlak-rowspan" class="mutlak-table">
+              <thead>
+                <tr>
+                  <th style="width: 50px; text-align: center;">NO</th>
+                  <th style="width: 320px;">NAMA GURU</th>
+                  <th style="width: 150px; text-align: center;">KELAS</th>
+                  <th>MATA PELAJARAN</th>
+                  <th style="width: 150px; text-align: center;">JUMLAH JAM (JJ)</th>
+                  <th style="width: 100px; text-align: center;">TOTAL</th>
+                </tr>
+              </thead>
+              <tbody>
+                <!-- Rendered dynamically via app.js -->
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+    </div><!-- /content -->
+  </div><!-- /main -->
+</div><!-- /app -->
+
+<!-- Loading overlay -->
+<div id="overlay" style="display:none">
+  <div class="spin-wrap">
+    <div class="spinner"></div>
+    <div id="overlay-txt">Memproses...</div>
+    <div id="overlay-progress" style="margin-top: 10px; font-size: 0.85rem; color: var(--muted); display: none;"></div>
+    <button id="btn-abort-generate" class="btn btn-danger btn-sm" style="margin-top: 15px; display: none;">
+      <i class="fa-solid fa-ban"></i> Batalkan Proses
+    </button>
+  </div>
+</div>
+
+<!-- Validation Modal -->
+<div id="modal-validate" style="display:none">
+  <div class="modal-box">
+    <div class="modal-head">
+      <h3 id="modal-val-title"><i class="fa-solid fa-shield-halved"></i> Hasil Validasi Data</h3>
+      <button class="btn btn-ghost btn-sm" id="modal-val-close"><i class="fa-solid fa-xmark"></i></button>
+    </div>
+    <div class="modal-body">
+      <div class="val-stats" id="val-stats-row"></div>
+      <div class="val-section" id="val-err-section" style="display:none">
+        <h4 style="color:var(--danger)"><i class="fa-solid fa-circle-xmark"></i> Error — Harus Diperbaiki</h4>
+        <ul class="val-list" id="val-err-list"></ul>
+      </div>
+      <div class="val-section" id="val-warn-section" style="display:none">
+        <h4 style="color:var(--warn)"><i class="fa-solid fa-triangle-exclamation"></i> Peringatan</h4>
+        <ul class="val-list" id="val-warn-list"></ul>
+      </div>
+      <div class="val-section" id="val-sum-section">
+        <h4 style="color:var(--muted)"><i class="fa-solid fa-list-check"></i> Ringkasan</h4>
+        <ul class="val-list" id="val-sum-list"></ul>
+      </div>
+    </div>
+    <div class="modal-foot">
+      <button class="btn btn-ghost" id="modal-val-close2">Tutup</button>
+      <button class="btn btn-primary" id="modal-val-generate" style="display:none">
+        <i class="fa-solid fa-bolt"></i> Lanjut Generate Jadwal
+      </button>
+    </div>
+  </div>
+</div>
+
+<!-- Modal Generate Failed -->
+<div id="modal-generate-failed" style="display:none">
+  <div class="modal-box" style="max-width: 650px;">
+    <div class="modal-head">
+      <h3 style="color: var(--danger);"><i class="fa-solid fa-circle-exclamation"></i> Gagal Generate Jadwal</h3>
+      <button class="btn btn-ghost btn-sm" id="modal-genfail-close"><i class="fa-solid fa-xmark"></i></button>
+    </div>
+    <div class="modal-body">
+      <p style="margin-bottom: 15px; font-size: 0.9rem; line-height: 1.5;">
+        Solver tidak dapat menemukan solusi jadwal yang layak (Infeasible) karena adanya konflik batasan data. Berikut adalah analisis penyebab kegagalan:
+      </p>
+      <div class="val-section" style="margin-top: 10px;">
+        <ul class="val-list" id="genfail-err-list" style="gap: 10px;">
+          <!-- list of detailed errors -->
+        </ul>
+      </div>
+      <div class="panel" style="margin-top: 20px; padding: 12px; background: var(--surface2); border: 1px dashed var(--border);">
+        <h4 style="font-size: 0.82rem; font-weight: 600; margin-bottom: 6px;"><i class="fa-solid fa-lightbulb" style="color:var(--warn)"></i> Rekomendasi Solusi:</h4>
+        <ul style="font-size: 0.8rem; padding-left: 16px; margin: 0; line-height: 1.6; color: var(--muted);">
+          <li>Periksa ketersediaan hari guru pengampu di Tab Guru.</li>
+          <li>Pastikan total JP yang dikunci ke Guru Mutlak tidak melebihi kapasitas hari aktifnya.</li>
+          <li>Jika ada mapel dengan kebutuhan JP tinggi, pastikan guru pengampu memiliki ketersediaan hari yang cukup.</li>
+        </ul>
+      </div>
+    </div>
+    <div class="modal-foot">
+      <button class="btn btn-primary" id="modal-genfail-ok">Tutup</button>
+    </div>
+  </div>
+</div>
+
+<!-- Add Modal -->
+<div id="modal-add" style="display:none">
+  <div class="modal-box">
+    <div class="modal-head">
+      <h3 id="modal-add-title"><i class="fa-solid fa-plus"></i> Tambah</h3>
+      <button class="btn btn-ghost btn-sm" id="modal-add-close"><i class="fa-solid fa-xmark"></i></button>
+    </div>
+    <div class="modal-body">
+
+      <!-- Tambah Guru -->
+      <div id="add-guru-fields" style="display:none">
+        <form class="form" id="form-guru">
+          <div class="field"><label>Nama Guru</label><input id="g-nama" type="text" required></div>
+          <div class="field"><label>Kode Guru (Angka)</label><input id="g-kode" type="number" required></div>
+          <div class="row2" style="display: flex; gap: 10px;">
+            <div class="field" style="flex: 1;"><label>Min JP</label><input id="g-min-jp" type="number" min="0" value="2" required></div>
+            <div class="field" style="flex: 1;"><label>Max JP</label><input id="g-max-jp" type="number" min="0" value="60" required></div>
+          </div>
+          <div class="field">
+            <label><i class="fa-solid fa-sun" style="color:var(--warn)"></i> Hari Tersedia — Shift Pagi</label>
+            <div class="days" id="days-pagi">
+              <label><input type="checkbox" value="SENIN" checked>Sen</label>
+              <label><input type="checkbox" value="SELASA" checked>Sel</label>
+              <label><input type="checkbox" value="RABU" checked>Rab</label>
+              <label><input type="checkbox" value="KAMIS" checked>Kam</label>
+              <label><input type="checkbox" value="JUMAT" checked>Jum</label>
+              <label><input type="checkbox" value="SABTU" checked>Sab</label>
+            </div>
+          </div>
+          <div class="field">
+            <label><i class="fa-solid fa-moon" style="color:var(--info)"></i> Hari Tersedia — Shift Siang</label>
+            <div class="days" id="days-siang">
+              <label><input type="checkbox" value="SENIN">Sen</label>
+              <label><input type="checkbox" value="SELASA">Sel</label>
+              <label><input type="checkbox" value="RABU">Rab</label>
+              <label><input type="checkbox" value="KAMIS">Kam</label>
+              <label><input type="checkbox" value="JUMAT">Jum</label>
+              <label><input type="checkbox" value="SABTU">Sab</label>
+            </div>
+          </div>
+          <div class="modal-foot" style="padding:16px 0 0; border:none; justify-content: flex-end; gap: 8px;">
+            <button type="button" class="btn btn-ghost" id="modal-add-cancel-guru">Batal</button>
+            <button type="submit" class="btn btn-primary"><i class="fa-solid fa-plus"></i> Tambah</button>
+          </div>
+        </form>
+      </div>
+
+      <!-- Tambah Kelas -->
+      <div id="add-kelas-fields" style="display:none">
+        <form class="form" id="form-kelas">
+          <div class="field"><label>Nama Kelas</label><input id="k-nama" type="text" required></div>
+          <div class="field"><label>Shift Operasional</label>
+            <select id="k-shift"><option value="PAGI">PAGI</option><option value="SIANG">SIANG</option></select>
+          </div>
+          <div class="row2" style="display: flex; gap: 10px;">
+            <div class="field" style="flex: 1;"><label>Tingkat</label><input id="k-tingkat" type="text"></div>
+            <div class="field" style="flex: 1;"><label>Jurusan</label><input id="k-jurusan" type="text"></div>
+          </div>
+          <div class="modal-foot" style="padding:16px 0 0; border:none; justify-content: flex-end; gap: 8px;">
+            <button type="button" class="btn btn-ghost" id="modal-add-cancel-kelas">Batal</button>
+            <button type="submit" class="btn btn-primary"><i class="fa-solid fa-plus"></i> Tambah</button>
+          </div>
+        </form>
+      </div>
+
+      <!-- Tambah Mapel -->
+      <div id="add-mapel-fields" style="display:none">
+        <form class="form" id="form-mapel">
+          <div class="field"><label>Nama Mapel</label><input id="m-nama" type="text" required></div>
+          <div class="field"><label>Kategori</label>
+            <select id="m-kat">
+              <option value="UMUM">UMUM</option>
+              <option value="OLAHRAGA">OLAHRAGA (PJOK)</option>
+              <option value="PRODUKTIF">PRODUKTIF (Kejuruan)</option>
+            </select>
+          </div>
+          <div class="row2" style="display: flex; gap: 10px;">
+            <div class="field" style="flex: 1;"><label>Tingkat</label><input id="m-tingkat" type="text"></div>
+            <div class="field" style="flex: 1;"><label>Jurusan</label><input id="m-jurusan" type="text"></div>
+          </div>
+          <div class="modal-foot" style="padding:16px 0 0; border:none; justify-content: flex-end; gap: 8px;">
+            <button type="button" class="btn btn-ghost" id="modal-add-cancel-mapel">Batal</button>
+            <button type="submit" class="btn btn-primary"><i class="fa-solid fa-plus"></i> Tambah</button>
+          </div>
+        </form>
+      </div>
+
+      <!-- Tambah Alokasi -->
+      <div id="add-alokasi-fields" style="display:none">
+        <div style="display: grid; grid-template-columns: 340px 1fr; gap: 20px; align-items: start;">
+          <!-- Left side: Form & Copy Section -->
+          <div>
+            <form class="form" id="form-alokasi" style="margin-bottom: 24px;">
+              <div class="field"><label>Kelas</label><select id="a-kelas" required></select></div>
+              <div class="field"><label>Mata Pelajaran</label><select id="a-mapel" required></select></div>
+              <div class="field"><label>Durasi JP</label><input id="a-dur" type="number" min="1" max="40" required></div>
+              <div class="field"><label>Guru Mutlak (Opsional)</label><select id="a-guru-mutlak"><option value="">— Tidak Ada —</option></select></div>
+              <div style="margin-top: 10px; display: flex; gap: 8px;">
+                <button type="button" class="btn btn-ghost btn-full" id="modal-add-cancel-alokasi">Tutup</button>
+                <button type="submit" class="btn btn-primary btn-full"><i class="fa-solid fa-plus"></i> Tambah</button>
+              </div>
+            </form>
+            <div style="padding-top: 20px; border-top: 1px solid var(--border);">
+              <h4 style="font-size: 0.85rem; font-weight: 600; color: var(--warn); margin-bottom: 12px; display: flex; align-items: center; gap: 6px;">
+                <i class="fa-solid fa-copy"></i> Salin Alokasi Kelas Lain
+              </h4>
+              <div class="form">
+                <div class="field">
+                  <label>Pilih Kelas Asal (Sumber)</label>
+                  <select id="a-copy-source-kelas">
+                    <option value="">— Pilih Kelas Asal —</option>
+                  </select>
+                </div>
+                <button type="button" class="btn btn-validate btn-full" id="btn-copy-alokasi">
+                  <i class="fa-solid fa-clone"></i> Salin Kurikulum
+                </button>
+              </div>
+            </div>
+          </div>
+          <!-- Right side: Current Allocations and JP status for Selected Class -->
+          <div>
+            <div style="margin-bottom: 12px; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px;">
+              <h4 style="font-size: 0.88rem; font-weight: 600; color: var(--primary-h);">
+                Alokasi Kelas: <span id="a-kelas-title-label">—</span>
+              </h4>
+              <div id="a-kelas-jp-summary-container" style="min-width: 180px;">
+                <!-- Rendered dynamically -->
+              </div>
+            </div>
+            <div class="tbl-wrap" style="max-height: 380px; overflow-y: auto; border: 1px solid var(--border); border-radius: 8px;">
+              <table id="tbl-modal-add-alokasi">
+                <thead>
+                  <tr>
+                    <th>Mata Pelajaran</th>
+                    <th style="width: 80px; text-align: center;">JP</th>
+                    <th>Guru Mutlak</th>
+                    <th style="width: 60px; text-align: center;">Aksi</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <!-- Rendered dynamically -->
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+</div>
+
+<!-- Edit Modal -->
+<div id="modal-edit" style="display:none">
+  <div class="modal-box">
+    <div class="modal-head">
+      <h3 id="modal-edit-title"><i class="fa-solid fa-pen-to-square"></i> Edit</h3>
+      <button class="btn btn-ghost btn-sm" id="modal-edit-close"><i class="fa-solid fa-xmark"></i></button>
+    </div>
+    <div class="modal-body">
+
+      <!-- Edit Guru -->
+      <div id="edit-guru-fields" style="display:none">
+        <div style="display: grid; grid-template-columns: 1.1fr 0.9fr; gap: 20px; align-items: start;">
+          <!-- Left side: Guru form -->
+          <form class="form" id="form-edit-guru">
+            <div class="field"><label>Nama Guru</label><input id="eg-nama" type="text" required></div>
+            <div class="field"><label>Kode Guru</label><input id="eg-kode" type="number" required></div>
+            <div class="row2" style="display: flex; gap: 10px;">
+              <div class="field" style="flex: 1;"><label>Min JP</label><input id="eg-min-jp" type="number" min="0" required></div>
+              <div class="field" style="flex: 1;"><label>Max JP</label><input id="eg-max-jp" type="number" min="0" required></div>
+            </div>
+            <div class="field">
+              <label><i class="fa-solid fa-sun" style="color:var(--warn)"></i> Hari Tersedia — Shift Pagi</label>
+              <div class="days" id="eg-days-pagi">
+                <label><input type="checkbox" value="SENIN">Sen</label><label><input type="checkbox" value="SELASA">Sel</label>
+                <label><input type="checkbox" value="RABU">Rab</label><label><input type="checkbox" value="KAMIS">Kam</label>
+                <label><input type="checkbox" value="JUMAT">Jum</label><label><input type="checkbox" value="SABTU">Sab</label>
+              </div>
+            </div>
+            <div class="field">
+              <label><i class="fa-solid fa-moon" style="color:var(--info)"></i> Hari Tersedia — Shift Siang</label>
+              <div class="days" id="eg-days-siang">
+                <label><input type="checkbox" value="SENIN">Sen</label><label><input type="checkbox" value="SELASA">Sel</label>
+                <label><input type="checkbox" value="RABU">Rab</label><label><input type="checkbox" value="KAMIS">Kam</label>
+                <label><input type="checkbox" value="JUMAT">Jum</label><label><input type="checkbox" value="SABTU">Sab</label>
+              </div>
+            </div>
+            <input type="hidden" id="eg-id">
+            
+            <div style="margin-top: 10px; display: flex; flex-direction: column; gap: 8px;">
+              <button type="button" class="btn btn-ghost btn-full" id="eg-btn-reset-availability" style="border-color: var(--primary); color: var(--text);">
+                <i class="fa-solid fa-arrows-rotate"></i> Reset Ketersediaan Mengajar (Buka Semua Hari &amp; Shift)
+              </button>
+              <button type="button" class="btn btn-info btn-full" id="eg-btn-manage-mutlak">
+                <i class="fa-solid fa-lock"></i> Kelola Guru Mutlak (Kelas Terkunci)
+              </button>
+              <button type="button" class="btn btn-secondary btn-full" id="eg-btn-manage-jp-restrictions" style="background-color: var(--warn); color: #000; font-weight: 600;">
+                <i class="fa-solid fa-clock"></i> Kelola Batasan Jam Pelajaran (JP)
+              </button>
+            </div>
+
+            <div class="modal-foot" style="padding:16px 0 0; border:none; justify-content: flex-end; gap: 8px;">
+              <button type="button" class="btn btn-ghost" id="modal-edit-cancel">Batal</button>
+              <button type="submit" class="btn btn-primary"><i class="fa-solid fa-floppy-disk"></i> Simpan</button>
+            </div>
+          </form>
+
+          <!-- Right side: Subjects management -->
+          <div class="panel" style="padding: 14px; margin-bottom: 0; background: var(--surface2);">
+            <h4 style="font-size: 0.85rem; font-weight: 600; color: var(--primary-h); margin-bottom: 8px;">
+              <i class="fa-solid fa-book-open"></i> Mata Pelajaran Diampu
+            </h4>
+            
+            <!-- List of assigned subjects -->
+            <div id="eg-subjects-list" style="max-height: 220px; overflow-y: auto; margin-bottom: 12px; display: flex; flex-direction: column; gap: 6px;">
+              <!-- assigned subjects with delete buttons -->
+            </div>
+
+            <!-- Form to assign new subject -->
+            <div style="display: flex; gap: 6px;">
+              <select id="eg-assign-subject-select" style="flex: 1; padding: 6px; font-size: 0.8rem; background: var(--bg); border: 1px solid var(--border); color: var(--text); border-radius: 6px;">
+                <option value="">— Pilih Mapel —</option>
+              </select>
+              <button type="button" class="btn btn-primary btn-sm" id="eg-btn-assign-subject" style="padding: 6px 12px;">
+                <i class="fa-solid fa-plus"></i>
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Edit Kelas -->
+      <div id="edit-kelas-fields" style="display:none">
+        <form class="form" id="form-edit-kelas">
+          <div class="field"><label>Nama Kelas</label><input id="ek-nama" type="text" required></div>
+          <div class="field"><label>Shift Operasional</label>
+            <select id="ek-shift"><option value="PAGI">PAGI</option><option value="SIANG">SIANG</option></select>
+          </div>
+          <div class="row2">
+            <div class="field"><label>Tingkat</label><input id="ek-tingkat" type="text"></div>
+            <div class="field"><label>Jurusan</label><input id="ek-jurusan" type="text"></div>
+          </div>
+          <input type="hidden" id="ek-id">
+          <div class="modal-foot" style="padding:16px 0 0;border:none">
+            <button type="button" class="btn btn-ghost" id="modal-edit-cancel-kelas">Batal</button>
+            <button type="submit" class="btn btn-primary"><i class="fa-solid fa-floppy-disk"></i> Simpan</button>
+          </div>
+        </form>
+      </div>
+
+      <!-- Edit Mapel -->
+      <div id="edit-mapel-fields" style="display:none">
+        <div style="display: grid; grid-template-columns: 1.1fr 0.9fr; gap: 20px; align-items: start;">
+          <!-- Left side: Mapel info form -->
+          <form class="form" id="form-edit-mapel" style="display: flex; flex-direction: column; gap: 12px;">
+            <div class="field"><label>Nama Mapel</label><input id="em-nama" type="text" required></div>
+            <div class="field"><label>Kategori</label>
+              <select id="em-kat">
+                <option value="UMUM">UMUM</option>
+                <option value="OLAHRAGA">OLAHRAGA (PJOK)</option>
+                <option value="PRODUKTIF">PRODUKTIF (Kejuruan)</option>
+              </select>
+            </div>
+            <div class="row2" style="display: flex; gap: 10px;">
+              <div class="field" style="flex: 1;"><label>Tingkat</label><input id="em-tingkat" type="text"></div>
+              <div class="field" style="flex: 1;"><label>Jurusan</label><input id="em-jurusan" type="text"></div>
+            </div>
+            <input type="hidden" id="em-id">
+            <div class="modal-foot" style="padding:16px 0 0; border:none; justify-content: flex-start; gap: 8px;">
+              <button type="button" class="btn btn-ghost" id="modal-edit-cancel-mapel">Batal</button>
+              <button type="submit" class="btn btn-primary"><i class="fa-solid fa-floppy-disk"></i> Simpan</button>
+            </div>
+          </form>
+
+          <!-- Right side: Classes and Teachers management -->
+          <div style="display: flex; flex-direction: column; gap: 16px;">
+            <!-- Classes using this subject -->
+            <div class="panel" style="padding: 12px; margin-bottom: 0; background: var(--surface2);">
+              <h4 style="font-size: 0.85rem; font-weight: 600; color: var(--muted); margin-bottom: 8px;">
+                <i class="fa-solid fa-school"></i> Kelas yang Menggunakan
+              </h4>
+              <div id="em-classes-list" style="display: flex; flex-wrap: wrap; gap: 6px; max-height: 120px; overflow-y: auto; padding: 4px 0;">
+                <!-- list of classes will go here as chips -->
+              </div>
+            </div>
+
+            <!-- Teachers management -->
+            <div class="panel" style="padding: 12px; margin-bottom: 0; background: var(--surface2);">
+              <h4 style="font-size: 0.85rem; font-weight: 600; color: var(--primary-h); margin-bottom: 8px;">
+                <i class="fa-solid fa-chalkboard-user"></i> Penugasan Guru
+              </h4>
+              
+              <!-- List of assigned teachers -->
+              <div id="em-teachers-list" style="max-height: 150px; overflow-y: auto; margin-bottom: 10px; display: flex; flex-direction: column; gap: 6px;">
+                <!-- assigned teachers with delete buttons -->
+              </div>
+
+              <!-- Form to assign new teacher -->
+              <div style="display: flex; gap: 6px;">
+                <select id="em-assign-guru-select" style="flex: 1; padding: 6px; font-size: 0.8rem; background: var(--bg); border: 1px solid var(--border); color: var(--text); border-radius: 6px;">
+                  <option value="">— Pilih Guru —</option>
+                </select>
+                <button type="button" class="btn btn-primary btn-sm" id="em-btn-assign-guru" style="padding: 6px 12px;">
+                  <i class="fa-solid fa-plus"></i>
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Edit Alokasi -->
+      <div id="edit-alokasi-fields" style="display:none">
+        <form class="form" id="form-edit-alokasi">
+          <input type="hidden" id="ea-id">
+          <input type="hidden" id="ea-old-guru-mutlak">
+          <div class="field"><label>Kelas</label><input id="ea-kelas" type="text" disabled></div>
+          <div class="field"><label>Mata Pelajaran</label><input id="ea-mapel" type="text" disabled></div>
+          <div class="field"><label>Durasi JP</label><input id="ea-dur" type="number" min="1" max="40" required></div>
+          <div class="field"><label>Guru Mutlak (Opsional)</label><select id="ea-guru-mutlak"><option value="">— Tidak Ada —</option></select></div>
+          <div class="btn-row" style="margin-top:12px;justify-content:flex-end">
+            <button type="button" class="btn btn-ghost" id="modal-edit-cancel-alokasi">Batal</button>
+            <button type="submit" class="btn btn-primary">Simpan</button>
+          </div>
+        </form>
+      </div>
+
+    </div>
+  </div>
+</div>
+
+<!-- Detail Mapel Modal -->
+<div id="modal-detail-mapel" style="display:none">
+  <div class="modal-box">
+    <div class="modal-head">
+      <h3><i class="fa-solid fa-circle-info" style="color:var(--info)"></i> Detail Mata Pelajaran</h3>
+      <button class="btn btn-ghost btn-sm" id="modal-detail-mapel-close"><i class="fa-solid fa-xmark"></i></button>
+    </div>
+    <div class="modal-body">
+      <div class="form">
+        <div class="field">
+          <label>Nama Mata Pelajaran</label>
+          <div id="det-mapel-nama" style="font-weight: 700; font-size: 1.15rem; color: var(--text); padding: 4px 0;">-</div>
+        </div>
+        <div class="field">
+          <label>Kategori</label>
+          <div id="det-mapel-kat" style="padding: 4px 0;">-</div>
+        </div>
+        <div class="row2" style="display:flex; gap:12px">
+          <div class="field" style="flex:1"><label>Tingkat</label><div id="det-mapel-tingkat" style="padding: 4px 0;">-</div></div>
+          <div class="field" style="flex:1"><label>Jurusan</label><div id="det-mapel-jurusan" style="padding: 4px 0;">-</div></div>
+        </div>
+        <div class="field" style="margin-top: 14px;">
+          <label style="font-weight: 600; color: var(--primary-h);"><i class="fa-solid fa-chalkboard-user"></i> Guru Pengampu / Ditugaskan</label>
+          <div id="det-mapel-gurus" style="margin-top: 6px;">-</div>
+        </div>
+      </div>
+    </div>
+    <div class="modal-foot">
+      <button class="btn btn-ghost" id="modal-detail-mapel-close2">Tutup</button>
+    </div>
+  </div>
+</div>
+
+<!-- Guru Mutlak Detail Modal (Open from Edit Guru Modal) -->
+<div id="modal-guru-mutlak-detail" style="display:none">
+  <div class="modal-box" style="max-width: 900px;">
+    <div class="modal-head">
+      <h3 id="modal-gm-detail-title"><i class="fa-solid fa-lock" style="color:var(--warn)"></i> Kelas &amp; Mapel Terkunci</h3>
+      <button class="btn btn-ghost btn-sm" id="modal-gm-detail-close"><i class="fa-solid fa-xmark"></i></button>
+    </div>
+    <div class="modal-body">
+      <div style="display: grid; grid-template-columns: 1fr 1.5fr; gap: 20px; align-items: start;">
+        
+        <!-- Left: Form to Add Locked Class/Subject -->
+        <div class="panel" style="padding: 14px; background: var(--surface2); margin-bottom: 0;">
+          <h4 style="font-size: 0.85rem; font-weight: 600; color: var(--primary-h); margin-bottom: 12px;">
+            <i class="fa-solid fa-lock-open"></i> Kunci Kelas Baru
+          </h4>
+          <form class="form" id="form-gm-detail-add" style="display: flex; flex-direction: column; gap: 10px;">
+            <div class="field">
+              <label>Mata Pelajaran</label>
+              <select id="mgm-mapel-select" required>
+                <option value="">— Pilih Mapel —</option>
+              </select>
+            </div>
+            <div class="field">
+              <label>Kelas</label>
+              <select id="mgm-kelas-select" required disabled>
+                <option value="">— Pilih Mapel Terlebih Dahulu —</option>
+              </select>
+            </div>
+            <button type="submit" class="btn btn-primary btn-full" style="margin-top: 6px;">
+              <i class="fa-solid fa-lock"></i> Kunci Guru ke Kelas
+            </button>
+          </form>
+        </div>
+
+        <!-- Right: List of Locked Class/Subject -->
+        <div class="panel" style="padding: 14px; background: var(--surface2); margin-bottom: 0;">
+          <h4 style="font-size: 0.85rem; font-weight: 600; color: var(--warn); margin-bottom: 12px;">
+            <i class="fa-solid fa-list-check"></i> Daftar Kelas Terkunci
+          </h4>
+          <div class="tbl-wrap">
+            <table id="tbl-gm-detail-list" style="font-size: 0.8rem;">
+              <thead>
+                <tr>
+                  <th>Kelas</th>
+                  <th>Mata Pelajaran</th>
+                  <th>JP</th>
+                  <th></th>
+                </tr>
+              </thead>
+              <tbody>
+                <!-- locked classes list -->
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+      </div>
+    </div>
+    <div class="modal-foot">
+      <button class="btn btn-ghost" id="modal-gm-detail-close2">Tutup</button>
+    </div>
+  </div>
+</div>
+
+<!-- Teacher JP Restriction Modal (Open from Edit Guru Modal) -->
+<div id="modal-teacher-jp-restriction" style="display:none">
+  <div class="modal-box" style="max-width: 900px;">
+    <div class="modal-head">
+      <h3><i class="fa-solid fa-clock" style="color:var(--warn)"></i> Batasan Jam Pelajaran (JP) — <span id="tjr-nama-guru" style="color:var(--primary-h);"></span></h3>
+      <button class="btn btn-ghost btn-sm" id="modal-tjr-close"><i class="fa-solid fa-xmark"></i></button>
+    </div>
+    <div class="modal-body">
+      <p style="font-size: 0.85rem; color: var(--muted); margin-bottom: 16px; line-height: 1.5;">
+        Tentukan jam pelajaran (JP) yang diperbolehkan untuk mengajar pada masing-masing shift. Centang JP untuk mengizinkan mengajar pada jam tersebut.
+        <br/>
+        <strong>Default/Buka Semua</strong>: Jika hari/shift tidak memiliki batasan (semua JP tercentang), guru bebas dijadwalkan kapan saja pada hari itu.
+      </p>
+
+      <div style="display: flex; flex-direction: column; gap: 20px;">
+        <!-- Panel Shift Pagi -->
+        <div class="panel" id="tjr-pagi-panel" style="padding: 14px; background: var(--surface2); margin-bottom: 0;">
+          <h4 style="font-size: 0.85rem; font-weight: 600; color: var(--warn); margin-bottom: 10px; display: flex; justify-content: space-between; align-items: center;">
+            <span><i class="fa-solid fa-sun" style="color:var(--warn)"></i> Shift Pagi</span>
+            <button type="button" class="btn btn-sm btn-primary" id="tjr-btn-select-all-pagi" style="padding: 2px 8px; font-size: 0.75rem;">Reset / Centang Semua</button>
+          </h4>
+          <div class="tbl-wrap">
+            <table style="width: 100%; border-collapse: collapse; text-align: center; font-size: 0.8rem;">
+              <thead>
+                <tr style="border-bottom: 1px solid var(--border);">
+                  <th style="padding: 6px; text-align: left;">Hari</th>
+                  <th style="padding: 6px;">JP 1</th>
+                  <th style="padding: 6px;">JP 2</th>
+                  <th style="padding: 6px;">JP 3</th>
+                  <th style="padding: 6px;">JP 4</th>
+                  <th style="padding: 6px;">JP 5</th>
+                  <th style="padding: 6px;">JP 6</th>
+                  <th style="padding: 6px;">JP 7</th>
+                </tr>
+              </thead>
+              <tbody id="tjr-pagi-grid">
+                <!-- Javascript will generate 6 rows (SENIN to SABTU) -->
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <!-- Panel Shift Siang -->
+        <div class="panel" id="tjr-siang-panel" style="padding: 14px; background: var(--surface2); margin-bottom: 0;">
+          <h4 style="font-size: 0.85rem; font-weight: 600; color: var(--info); margin-bottom: 10px; display: flex; justify-content: space-between; align-items: center;">
+            <span><i class="fa-solid fa-moon" style="color:var(--info)"></i> Shift Siang</span>
+            <button type="button" class="btn btn-sm btn-primary" id="tjr-btn-select-all-siang" style="padding: 2px 8px; font-size: 0.75rem;">Reset / Centang Semua</button>
+          </h4>
+          <div class="tbl-wrap">
+            <table style="width: 100%; border-collapse: collapse; text-align: center; font-size: 0.8rem;">
+              <thead>
+                <tr style="border-bottom: 1px solid var(--border);">
+                  <th style="padding: 6px; text-align: left;">Hari</th>
+                  <th style="padding: 6px;">JP 1</th>
+                  <th style="padding: 6px;">JP 2</th>
+                  <th style="padding: 6px;">JP 3</th>
+                  <th style="padding: 6px;">JP 4</th>
+                  <th style="padding: 6px;">JP 5</th>
+                  <th style="padding: 6px;">JP 6</th>
+                  <th style="padding: 6px;">JP 7</th>
+                </tr>
+              </thead>
+              <tbody id="tjr-siang-grid">
+                <!-- Javascript will generate 6 rows (SENIN to SABTU) -->
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="modal-foot">
+      <button class="btn btn-ghost" id="modal-tjr-cancel">Batal</button>
+      <button class="btn btn-primary" id="modal-tjr-save"><i class="fa-solid fa-floppy-disk"></i> Simpan Batasan</button>
+    </div>
+  </div>
+</div>
+
+<!-- Modal Add Guru Mutlak -->
+<div id="modal-guru-mutlak-add" style="display:none">
+  <div class="modal-box" style="max-width: 500px;">
+    <div class="modal-head">
+      <h3><i class="fa-solid fa-lock" style="color:var(--success)"></i> Kunci Guru Mutlak</h3>
+      <button class="btn btn-ghost btn-sm" id="modal-gm-add-close"><i class="fa-solid fa-xmark"></i></button>
+    </div>
+    <div class="modal-body">
+      <form class="form" id="form-gm-add-modal">
+        <input type="hidden" id="gm-add-teacher-id">
+        <div class="field">
+          <label>Nama Guru</label>
+          <input id="gm-add-teacher-name" type="text" disabled style="background: var(--surface2);">
+        </div>
+        <div class="field">
+          <label>Pilih Kelas</label>
+          <select id="gm-add-class-select" required>
+            <option value="">— Pilih Kelas —</option>
+          </select>
+        </div>
+        <div class="field">
+          <label>Pilih Mata Pelajaran</label>
+          <select id="gm-add-mapel-select" required disabled>
+            <option value="">— Pilih Kelas Terlebih Dahulu —</option>
+          </select>
+        </div>
+        <div class="field">
+          <label>Jumlah Jam (JJ)</label>
+          <input id="gm-add-duration-input" type="text" readonly disabled placeholder="Terisi otomatis">
+        </div>
+        <div class="modal-foot" style="padding:16px 0 0; border:none; justify-content: flex-end; gap: 8px;">
+          <button type="button" class="btn btn-ghost" id="modal-gm-add-cancel">Batal</button>
+          <button type="submit" class="btn btn-primary"><i class="fa-solid fa-lock"></i> Simpan</button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+
+<!-- Modal Copy Alokasi -->
+<div id="modal-copy-alokasi" style="display:none">
+  <div class="modal-box" style="max-width: 480px;">
+    <div class="modal-head">
+      <h3><i class="fa-solid fa-copy" style="color:var(--primary-h)"></i> Salin Alokasi Kurikulum</h3>
+      <button class="btn btn-ghost btn-sm" id="modal-copy-alokasi-close"><i class="fa-solid fa-xmark"></i></button>
+    </div>
+    <div class="modal-body">
+      <p class="hint" style="margin-bottom: 16px; line-height: 1.5;">
+        Fitur ini akan menyalin seluruh alokasi mata pelajaran dari kelas asal (sumber) ke kelas tujuan. 
+        <br>
+        <strong style="color: var(--danger)"><i class="fa-solid fa-triangle-exclamation"></i> Peringatan:</strong> Semua alokasi yang ada di kelas tujuan saat ini akan dihapus dan digantikan dengan alokasi dari kelas asal.
+      </p>
+      <form class="form" id="form-copy-alokasi">
+        <div class="field">
+          <label>Kelas Asal (Sumber)</label>
+          <select id="copy-source-kelas" required>
+            <option value="">— Pilih Kelas Asal —</option>
+          </select>
+        </div>
+        <div class="field">
+          <label>Kelas Tujuan (Target)</label>
+          <select id="copy-target-kelas" required>
+            <option value="">— Pilih Kelas Tujuan —</option>
+          </select>
+        </div>
+        <div class="modal-foot" style="padding: 16px 0 0; border: none; justify-content: flex-end; gap: 8px;">
+          <button type="button" class="btn btn-ghost" id="modal-copy-alokasi-cancel">Batal</button>
+          <button type="submit" class="btn btn-primary"><i class="fa-solid fa-clone"></i> Salin Sekarang</button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+
+<script src="app.js?v=21"></script>
+</body>
+</html>
