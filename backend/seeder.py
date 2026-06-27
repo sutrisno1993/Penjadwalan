@@ -151,6 +151,7 @@ def _guru(no: int, nama: str) -> dict:
         "shift_siang":         True,
         "hari_tersedia_pagi":  ALL_DAYS,
         "hari_tersedia_siang": ALL_DAYS,
+        "no_wa":               f"08123456{no:04d}",
     }
 
 TEACHERS: list[dict] = [
@@ -300,18 +301,7 @@ def run_seeder():
     cur  = conn.cursor()
     try:
         # ── 1. Tambah constraint unik pada subjects jika belum ada ─────
-        cur.execute("""
-            DO $$
-            BEGIN
-                IF NOT EXISTS (
-                    SELECT 1 FROM pg_constraint
-                    WHERE conname = 'subjects_nama_mapel_key'
-                ) THEN
-                    ALTER TABLE subjects ADD CONSTRAINT subjects_nama_mapel_key UNIQUE (nama_mapel);
-                END IF;
-            END
-            $$;
-        """)
+        pass
 
         # ── 2. Insert mata pelajaran ───────────────────────────────────
         logger.info("Memasukkan data mata pelajaran...")
@@ -319,9 +309,8 @@ def run_seeder():
         for s in SUBJECTS:
             cur.execute(
                 """
-                INSERT INTO subjects (nama_mapel, kategori_mapel)
+                INSERT IGNORE INTO subjects (nama_mapel, kategori_mapel)
                 VALUES (%s, %s)
-                ON CONFLICT (nama_mapel) DO NOTHING
                 """,
                 (s["nama_mapel"], s["kategori_mapel"]),
             )
@@ -341,9 +330,10 @@ def run_seeder():
                 """
                 INSERT INTO teachers
                     (kode_guru, nama_guru, hari_tersedia, shift_pagi, shift_siang,
-                     hari_tersedia_pagi, hari_tersedia_siang)
-                VALUES (%s, %s, %s, %s, %s, %s, %s)
-                ON CONFLICT (kode_guru) DO NOTHING
+                     hari_tersedia_pagi, hari_tersedia_siang, no_wa)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                ON DUPLICATE KEY UPDATE
+                    no_wa = VALUES(no_wa)
                 """,
                 (
                     t["kode_guru"],
@@ -353,6 +343,7 @@ def run_seeder():
                     t["shift_siang"],
                     t["hari_tersedia_pagi"],
                     t["hari_tersedia_siang"],
+                    t["no_wa"],
                 ),
             )
             if cur.rowcount:
@@ -383,9 +374,8 @@ def run_seeder():
                     continue
                 cur.execute(
                     """
-                    INSERT INTO teacher_subjects (id_guru, id_mapel)
+                    INSERT IGNORE INTO teacher_subjects (id_guru, id_mapel)
                     VALUES (%s, %s)
-                    ON CONFLICT (id_guru, id_mapel) DO NOTHING
                     """,
                     (id_guru, id_mapel),
                 )
@@ -418,10 +408,10 @@ def run_seeder():
                 """
                 INSERT INTO classes (nama_kelas, shift_operasional, tingkat, jurusan)
                 VALUES (%s, %s, %s, %s)
-                ON CONFLICT (nama_kelas) DO UPDATE SET
-                    shift_operasional = EXCLUDED.shift_operasional,
-                    tingkat = EXCLUDED.tingkat,
-                    jurusan = EXCLUDED.jurusan
+                ON DUPLICATE KEY UPDATE
+                    shift_operasional = VALUES(shift_operasional),
+                    tingkat = VALUES(tingkat),
+                    jurusan = VALUES(jurusan)
                 """,
                 (class_name, shift, tingkat, jurusan)
             )
@@ -442,7 +432,7 @@ def run_seeder():
                 """
                 INSERT INTO class_subjects (id_kelas, id_mapel, durasi_jp)
                 VALUES (%s, %s, %s)
-                ON CONFLICT (id_kelas, id_mapel) DO UPDATE SET durasi_jp = EXCLUDED.durasi_jp
+                ON DUPLICATE KEY UPDATE durasi_jp = VALUES(durasi_jp)
                 """,
                 (id_kelas, id_mapel, alloc['jp'])
             )

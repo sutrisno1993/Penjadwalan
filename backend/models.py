@@ -23,6 +23,7 @@ class TeacherBase(BaseModel):
     max_jp:              Optional[int]      = None
     allowed_jp_pagi:     Optional[dict[str, List[int]]] = None
     allowed_jp_siang:    Optional[dict[str, List[int]]] = None
+    no_wa:               Optional[str]                  = None
 
 class TeacherCreate(TeacherBase):
     pass
@@ -131,3 +132,5 @@ class TeacherSubject(TeacherSubjectBase):
 class SettingsUpdate(BaseModel):
     spreadsheet_id:   str
     credentials_json: str
+    lms_api_url:      Optional[str] = None
+    lms_api_key:      Optional[str] = None

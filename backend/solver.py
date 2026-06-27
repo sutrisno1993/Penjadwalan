@@ -8,7 +8,7 @@ import json
 import logging
 from ortools.sat.python import cp_model
 from backend.database import get_db_connection, db_fetchall
-from psycopg2.extras import execute_values
+
 
 logger = logging.getLogger(__name__)
 
@@ -977,11 +977,13 @@ def _save_timetable(results):
     conn = get_db_connection()
     cur  = conn.cursor()
     try:
+        cur.execute("SET FOREIGN_KEY_CHECKS = 0;")
         cur.execute("DELETE FROM timetable")
-        execute_values(cur, """
+        cur.execute("SET FOREIGN_KEY_CHECKS = 1;")
+        cur.executemany("""
             INSERT INTO timetable
                 (id_class_subject, hari, jam_ke, id_guru, is_fallback, original_guru_id)
-            VALUES %s
+            VALUES (%s, %s, %s, %s, %s, %s)
         """, [
             (r["id_class_subject"], r["hari"], r["jam_ke"],
              r["id_guru"], bool(r["is_fallback"]), r["original_guru_id"])

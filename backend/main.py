@@ -17,8 +17,7 @@ try:
 except ImportError:
     pass
 
-import psycopg2
-import psycopg2.errors
+import pymysql
 from fastapi import FastAPI, HTTPException, UploadFile, File
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import StreamingResponse
@@ -90,6 +89,8 @@ def get_system_settings():
     return {
         "spreadsheet_id":   get_setting("spreadsheet_id", ""),
         "credentials_json": get_setting("credentials_json", ""),
+        "lms_api_url":      get_setting("lms_api_url", ""),
+        "lms_api_key":      get_setting("lms_api_key", ""),
     }
 
 @app.post("/api/settings")
@@ -101,6 +102,8 @@ def update_system_settings(body: SettingsUpdate):
             raise HTTPException(400, "Format Credentials JSON tidak valid!")
     save_setting("spreadsheet_id",   body.spreadsheet_id)
     save_setting("credentials_json", body.credentials_json)
+    save_setting("lms_api_url",      body.lms_api_url or "")
+    save_setting("lms_api_key",      body.lms_api_key or "")
     return {"status": "SUCCESS", "message": "Pengaturan berhasil disimpan!"}
 
 
@@ -128,10 +131,10 @@ def download_template():
     ws1 = wb.active
     ws1.title = "master_guru"
     ws1.append(["nama_guru", "kode_guru", "hari_tersedia", "shift_pagi", "shift_siang",
-                 "hari_tersedia_pagi", "hari_tersedia_siang", "min_jp", "max_jp"])
-    ws1.append(["Budi Santoso, S.Pd",  101, "SENIN,SELASA,RABU,KAMIS",               "YA", "TIDAK", "SENIN,SELASA,RABU,KAMIS", "", "", ""])
-    ws1.append(["Siti Aminah, S.Pd",   102, "SENIN,RABU,KAMIS,JUMAT,SABTU",           "YA", "YA",    "SENIN,RABU,KAMIS", "JUMAT,SABTU", "", ""])
-    ws1.append(["Eko Prasetyo, S.Kom", 103, "SENIN,SELASA,RABU,KAMIS,JUMAT,SABTU",   "YA", "YA",    "SENIN,SELASA,RABU,KAMIS,JUMAT,SABTU", "SENIN,SELASA,RABU,KAMIS,JUMAT,SABTU", "", ""])
+                 "hari_tersedia_pagi", "hari_tersedia_siang", "min_jp", "max_jp", "no_wa"])
+    ws1.append(["Budi Santoso, S.Pd",  101, "SENIN,SELASA,RABU,KAMIS",               "YA", "TIDAK", "SENIN,SELASA,RABU,KAMIS", "", "", "", "081234567890"])
+    ws1.append(["Siti Aminah, S.Pd",   102, "SENIN,RABU,KAMIS,JUMAT,SABTU",           "YA", "YA",    "SENIN,RABU,KAMIS", "JUMAT,SABTU", "", "", "089876543210"])
+    ws1.append(["Eko Prasetyo, S.Kom", 103, "SENIN,SELASA,RABU,KAMIS,JUMAT,SABTU",   "YA", "YA",    "SENIN,SELASA,RABU,KAMIS,JUMAT,SABTU", "SENIN,SELASA,RABU,KAMIS,JUMAT,SABTU", "", "", "085544332211"])
 
     ws2 = wb.create_sheet("master_kelas")
     ws2.append(["nama_kelas", "shift_operasional", "tingkat", "jurusan"])
@@ -215,6 +218,124 @@ def sync_push():
         return export_timetable_to_sheet()
     except Exception as e:
         raise HTTPException(500, str(e))
+
+@app.post("/api/sync/lms")
+def sync_to_lms():
+    import urllib.request
+    import urllib.error
+    import ssl
+    from urllib.parse import urlparse
+    
+    conn = get_db_connection()
+    try:
+        lms_url = get_setting("lms_api_url", "").strip()
+        lms_key = get_setting("lms_api_key", "").strip()
+        
+        if not lms_url or not lms_key:
+            raise HTTPException(400, "LMS API URL dan API Key belum dikonfigurasi di Pengaturan!")
+            
+        # Normalisasi URL agar selalu mengarah ke endpoint API /api/v1/sync-all
+        # Mengatasi kasus jika user menginput domain utama atau URL halaman admin login
+        parsed_url = urlparse(lms_url)
+        scheme = parsed_url.scheme or "https"
+        netloc = parsed_url.netloc
+        if not netloc and parsed_url.path:
+            parts = parsed_url.path.split('/')
+            netloc = parts[0]
+        lms_url = f"{scheme}://{netloc}/api/v1/sync-all"
+            
+        teachers = db_fetchall(conn, "SELECT * FROM teachers ORDER BY nama_guru")
+        for t in teachers:
+            t["hari_tersedia"]       = json.loads(t["hari_tersedia"] or "[]")
+            t["shift_pagi"]          = bool(t["shift_pagi"])
+            t["shift_siang"]         = bool(t["shift_siang"])
+            t["hari_tersedia_pagi"]  = json.loads(t["hari_tersedia_pagi"])  if t.get("hari_tersedia_pagi")  else None
+            t["hari_tersedia_siang"] = json.loads(t["hari_tersedia_siang"]) if t.get("hari_tersedia_siang") else None
+            t["min_jp"]              = t.get("min_jp")
+            t["max_jp"]              = t.get("max_jp")
+            t["allowed_jp_pagi"]     = json.loads(t["allowed_jp_pagi"])     if t.get("allowed_jp_pagi")     else None
+            t["allowed_jp_siang"]    = json.loads(t["allowed_jp_siang"])    if t.get("allowed_jp_siang")    else None
+            
+        classes = db_fetchall(conn, "SELECT nama_kelas, shift_operasional, tingkat, jurusan FROM classes ORDER BY nama_kelas")
+        subjects = db_fetchall(conn, "SELECT nama_mapel, kategori_mapel, tingkat, jurusan FROM subjects ORDER BY nama_mapel")
+        
+        teacher_subjects = db_fetchall(conn, """
+            SELECT t.kode_guru, s.nama_mapel
+            FROM teacher_subjects ts
+            JOIN teachers t ON ts.id_guru = t.id_guru
+            JOIN subjects s ON ts.id_mapel = s.id_mapel
+            ORDER BY t.nama_guru, s.nama_mapel
+        """)
+        
+        class_subjects = db_fetchall(conn, """
+            SELECT c.nama_kelas, s.nama_mapel, cs.durasi_jp, t.kode_guru AS kode_guru_mutlak
+            FROM class_subjects cs
+            JOIN classes c ON cs.id_kelas = c.id_kelas
+            JOIN subjects s ON cs.id_mapel = s.id_mapel
+            LEFT JOIN teachers t ON cs.id_guru_mutlak = t.id_guru
+            ORDER BY c.nama_kelas, s.nama_mapel
+        """)
+        
+        timetable = db_fetchall(conn, """
+            SELECT c.nama_kelas, s.nama_mapel, g.kode_guru, t.hari, t.jam_ke,
+                   t.is_fallback, gorig.kode_guru AS original_guru_kode
+            FROM timetable t
+            JOIN class_subjects cs ON t.id_class_subject = cs.id_class_subject
+            JOIN classes c ON cs.id_kelas = c.id_kelas
+            JOIN subjects s ON cs.id_mapel = s.id_mapel
+            LEFT JOIN teachers g ON t.id_guru = g.id_guru
+            LEFT JOIN teachers gorig ON t.original_guru_id = gorig.id_guru
+            ORDER BY c.nama_kelas, t.hari, t.jam_ke
+        """)
+        for slot in timetable:
+            slot["is_fallback"] = bool(slot["is_fallback"])
+            
+        payload = {
+            "teachers": teachers,
+            "classes": classes,
+            "subjects": subjects,
+            "teacher_subjects": teacher_subjects,
+            "class_subjects": class_subjects,
+            "timetable": timetable
+        }
+        
+        import datetime
+        def default_serializer(obj):
+            if isinstance(obj, (datetime.date, datetime.datetime)):
+                return obj.isoformat()
+            raise TypeError(f"Type {type(obj)} not serializable")
+
+        try:
+            ctx = ssl._create_unverified_context()
+            req = urllib.request.Request(
+                lms_url,
+                data=json.dumps(payload, default=default_serializer).encode('utf-8'),
+                headers={
+                    'Content-Type': 'application/json',
+                    'Authorization': f'Bearer {lms_key}',
+                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+                },
+                method='POST'
+            )
+            with urllib.request.urlopen(req, context=ctx, timeout=30) as response:
+                res_body = response.read().decode('utf-8')
+                res_json = json.loads(res_body)
+                return {"status": "SUCCESS", "message": res_json.get("message", "Sinkronisasi ke LMS berhasil!")}
+        except urllib.error.HTTPError as e:
+            err_body = e.read().decode('utf-8')
+            logger.error(f"HTTPError syncing to LMS: {err_body}")
+            try:
+                err_json = json.loads(err_body)
+                msg = err_json.get("message", str(e))
+            except Exception:
+                msg = err_body[:200] or str(e)
+            raise HTTPException(status_code=e.code, detail=f"LMS Server Error: {msg}")
+        except Exception as e:
+            logger.exception("Connection error to LMS")
+            raise HTTPException(status_code=500, detail=f"Gagal menghubungi server LMS: {e}")
+            
+    finally:
+        conn.close()
 
 
 # ═══════════════════════════════════════════════
@@ -853,7 +974,9 @@ def delete_timetable():
     conn = get_db_connection()
     cur  = conn.cursor()
     try:
+        cur.execute("SET FOREIGN_KEY_CHECKS = 0;")
         cur.execute("TRUNCATE TABLE timetable")
+        cur.execute("SET FOREIGN_KEY_CHECKS = 1;")
         conn.commit()
         return {"status": "SUCCESS", "message": "Jadwal berhasil direset (dikosongkan)"}
     finally:
@@ -904,8 +1027,8 @@ def create_teacher(body: TeacherCreate):
             INSERT INTO teachers
                 (nama_guru, kode_guru, hari_tersedia, shift_pagi, shift_siang,
                  hari_tersedia_pagi, hari_tersedia_siang, min_jp, max_jp,
-                 allowed_jp_pagi, allowed_jp_siang)
-            VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                 allowed_jp_pagi, allowed_jp_siang, no_wa)
+            VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
             RETURNING id_guru
         """, (
             body.nama_guru, body.kode_guru,
@@ -917,11 +1040,12 @@ def create_teacher(body: TeacherCreate):
             body.max_jp,
             json.dumps(body.allowed_jp_pagi)     if body.allowed_jp_pagi     else None,
             json.dumps(body.allowed_jp_siang)    if body.allowed_jp_siang    else None,
+            body.no_wa,
         ))
         conn.commit()
         new_id = cur.fetchone()["id_guru"]
         return {**body.model_dump(), "id_guru": new_id}
-    except psycopg2.errors.UniqueViolation:
+    except pymysql.err.IntegrityError:
         conn.rollback()
         raise HTTPException(400, f"Kode guru {body.kode_guru} sudah terdaftar!")
     finally:
@@ -938,7 +1062,8 @@ def update_teacher(id_guru: int, body: TeacherCreate):
                 hari_tersedia = %s, shift_pagi = %s, shift_siang = %s,
                 hari_tersedia_pagi = %s, hari_tersedia_siang = %s,
                 min_jp = %s, max_jp = %s,
-                allowed_jp_pagi = %s, allowed_jp_siang = %s
+                allowed_jp_pagi = %s, allowed_jp_siang = %s,
+                no_wa = %s
             WHERE id_guru = %s RETURNING id_guru
         """, (
             body.nama_guru, body.kode_guru,
@@ -950,13 +1075,14 @@ def update_teacher(id_guru: int, body: TeacherCreate):
             body.max_jp,
             json.dumps(body.allowed_jp_pagi)     if body.allowed_jp_pagi     else None,
             json.dumps(body.allowed_jp_siang)    if body.allowed_jp_siang    else None,
+            body.no_wa,
             id_guru,
         ))
         conn.commit()
         if not cur.fetchone():
             raise HTTPException(404, "Guru tidak ditemukan")
         return {**body.model_dump(), "id_guru": id_guru}
-    except psycopg2.errors.UniqueViolation:
+    except pymysql.err.IntegrityError:
         conn.rollback()
         raise HTTPException(400, f"Kode guru {body.kode_guru} sudah terdaftar!")
     finally:
@@ -1007,7 +1133,7 @@ def create_class(body: ClassCreate):
         conn.commit()
         new_id = cur.fetchone()["id_kelas"]
         return {**body.model_dump(), "id_kelas": new_id, "tingkat": tingkat, "jurusan": jurusan}
-    except psycopg2.errors.UniqueViolation:
+    except pymysql.err.IntegrityError:
         conn.rollback()
         raise HTTPException(400, "Nama kelas sudah terdaftar!")
     finally:
@@ -1031,7 +1157,7 @@ def update_class(id_kelas: int, body: ClassCreate):
         if not cur.fetchone():
             raise HTTPException(404, "Kelas tidak ditemukan")
         return {**body.model_dump(), "id_kelas": id_kelas, "tingkat": tingkat, "jurusan": jurusan}
-    except psycopg2.errors.UniqueViolation:
+    except pymysql.err.IntegrityError:
         conn.rollback()
         raise HTTPException(400, "Nama kelas sudah terdaftar!")
     finally:
@@ -1157,7 +1283,7 @@ def create_allocation(body: ClassSubjectCreate):
             WHERE  cs.id_class_subject = %s
         """, (new_id,))
         return row
-    except psycopg2.errors.UniqueViolation:
+    except pymysql.err.IntegrityError:
         conn.rollback()
         raise HTTPException(400, "Mata pelajaran sudah dialokasikan untuk kelas ini!")
     finally:
@@ -1275,7 +1401,7 @@ def create_teacher_subject(body: TeacherSubjectCreate):
             WHERE  ts.id_teacher_subject = %s
         """, (new_id,))
         return row
-    except psycopg2.errors.UniqueViolation:
+    except pymysql.err.IntegrityError:
         conn.rollback()
         raise HTTPException(400, "Penugasan guru untuk mata pelajaran ini sudah ada!")
     finally:
@@ -1326,4 +1452,4 @@ app.mount("/", StaticFiles(directory="frontend", html=True), name="frontend")
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    uvicorn.run(app, host="0.0.0.0", port=8001)

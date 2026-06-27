@@ -1,0 +1,7 @@
+INFO:backend.database:Initializing ThreadedConnectionPool (min=2, max=20)...
+INFO:backend.database:Schema Supabase/PostgreSQL untuk cabang 'bekasi' berhasil diinisialisasi.
+INFO:backend.database:Schema Supabase/PostgreSQL untuk cabang 'jakarta' berhasil diinisialisasi.
+INFO:     Started server process [30180]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+INFO:     Uvicorn running on http://127.0.0.1:8001 (Press CTRL+C to quit)

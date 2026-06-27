@@ -34,17 +34,17 @@ Server backend SITAB dibangun dengan FastAPI dan telah dikonfigurasi untuk menya
 
 Jalankan perintah berikut:
 ```bash
-py -m uvicorn backend.main:app --host 0.0.0.0 --port 8000 --reload
+py -m uvicorn backend.main:app --host 127.0.0.1 --port 8002 --reload
 ```
 * **Keterangan Perintah:**
   * `py -m uvicorn`: Menjalankan server ASGI Uvicorn menggunakan Python.
   * `backend.main:app`: Merujuk ke file `backend/main.py` dengan objek FastAPI bernama `app`.
-  * `--host 0.0.0.0`: Mengizinkan koneksi dari jaringan luar (opsional).
-  * `--port 8000`: Port server backend dijalankan.
+  * `--host 127.0.0.1`: Menjalankan server pada localhost.
+  * `--port 8002`: Port server backend dijalankan.
   * `--reload`: Mengaktifkan mode auto-restart saat ada perubahan kode (sangat berguna untuk pengembangan).
 
 Setelah perintah di atas berjalan, buka browser Anda dan kunjungi alamat berikut untuk menggunakan aplikasi:
-👉 **[http://localhost:8000](http://localhost:8000)**
+👉 **[http://localhost:8002](http://localhost:8002)**
 
 ---
 
@@ -64,7 +64,7 @@ Setelah server menyala, Anda bisa mengaksesnya di:
 👉 **[http://localhost:3000](http://localhost:3000)**
 
 > [!WARNING]
-> Jika Anda menggunakan port terpisah (`3000`), beberapa fungsi fetch API mungkin perlu disesuaikan karena perbedaan origin (CORS) atau ketidaktersediaan rute `/api` secara relatif pada port `3000`. Direkomendasikan tetap menggunakan port `8000`.
+> Jika Anda menggunakan port terpisah (`3000`), beberapa fungsi fetch API mungkin perlu disesuaikan karena perbedaan origin (CORS) atau ketidaktersediaan rute `/api` secara relatif pada port `3000`. Direkomendasikan tetap menggunakan port `8002`.
 
 ---
 

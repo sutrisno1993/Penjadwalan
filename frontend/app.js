@@ -681,6 +681,18 @@ function renderTeachersTable() {
       ? mapels.map(m => `<span class="mapel-chip"><i class="fa-solid fa-book" style="font-size:.65rem"></i>${esc(m)}</span>`).join("")
       : `<span class="no-mapel">Belum ada penugasan mapel</span>`;
 
+    let waLink = "";
+    if (t.no_wa) {
+      const cleanNum = String(t.no_wa).replace(/\D/g, "");
+      let formattedNum = cleanNum;
+      if (cleanNum.startsWith("0")) {
+        formattedNum = "62" + cleanNum.slice(1);
+      }
+      waLink = `<a href="https://wa.me/${formattedNum}" target="_blank" onclick="event.stopPropagation();" style="color: var(--success); font-weight: 500;"><i class="fa-brands fa-whatsapp"></i> ${esc(t.no_wa)}</a>`;
+    } else {
+      waLink = `<span style="color: var(--muted); font-style: italic;">—</span>`;
+    }
+
     return `
     <tr class="guru-main-row" onclick="toggleGuruDetail(${t.id_guru}, this)">
       <td style="width:28px;padding-right:0">
@@ -690,6 +702,7 @@ function renderTeachersTable() {
       </td>
       <td><code>${esc(String(t.kode_guru))}</code></td>
       <td><strong>${esc(t.nama_guru)}</strong></td>
+      <td>${waLink}</td>
       <td>${esc(shift)}</td>
       <td>${mapelPreview}</td>
       <td style="white-space:nowrap">
@@ -698,7 +711,7 @@ function renderTeachersTable() {
       </td>
     </tr>
     <tr class="guru-detail-row" id="detail-${t.id_guru}" style="display:none">
-      <td colspan="6">
+      <td colspan="7">
         <div class="guru-detail-inner">
           <div class="guru-detail-section">
             <h5><i class="fa-solid fa-sun" style="color:var(--warn)"></i> Shift Pagi — Hari Tersedia</h5>
@@ -795,6 +808,7 @@ $("form-guru").addEventListener("submit", async e => {
     hari_tersedia_siang: hari_siang,
     min_jp:      $("g-min-jp").value.trim() !== "" ? parseInt($("g-min-jp").value) : null,
     max_jp:      $("g-max-jp").value.trim() !== "" ? parseInt($("g-max-jp").value) : null,
+    no_wa:       $("g-wa").value.trim() || null,
   };
   try {
     showOverlay("Menyimpan data guru...");
@@ -835,6 +849,7 @@ function editGuru(id) {
   $("eg-kode").value = t.kode_guru;
   $("eg-min-jp").value = t.min_jp ?? 2;
   $("eg-max-jp").value = t.max_jp ?? 60;
+  $("eg-wa").value   = t.no_wa || "";
   setCheckedDays("eg-days-pagi",  t.hari_tersedia_pagi  || []);
   setCheckedDays("eg-days-siang", t.hari_tersedia_siang || []);
 
@@ -880,6 +895,7 @@ $("form-edit-guru").addEventListener("submit", async e => {
     hari_tersedia_siang: hari_siang,
     min_jp:      $("eg-min-jp").value.trim() !== "" ? parseInt($("eg-min-jp").value) : null,
     max_jp:      $("eg-max-jp").value.trim() !== "" ? parseInt($("eg-max-jp").value) : null,
+    no_wa:       $("eg-wa").value.trim() || null,
     allowed_jp_pagi: state.currentTeacherJPRestrictions ? state.currentTeacherJPRestrictions.pagi : null,
     allowed_jp_siang: state.currentTeacherJPRestrictions ? state.currentTeacherJPRestrictions.siang : null,
   };
@@ -2564,6 +2580,8 @@ async function loadSettings() {
     const s = await api("GET", "/api/settings");
     if ($("cfg-sid"))   $("cfg-sid").value   = s.spreadsheet_id   || "";
     if ($("cfg-creds")) $("cfg-creds").value = s.credentials_json || "";
+    if ($("cfg-lms-url")) $("cfg-lms-url").value = s.lms_api_url || "";
+    if ($("cfg-lms-key")) $("cfg-lms-key").value = s.lms_api_key || "";
   } catch {}
 }
 
@@ -2572,6 +2590,8 @@ $("form-settings")?.addEventListener("submit", async e => {
   const body = {
     spreadsheet_id:   $("cfg-sid").value.trim(),
     credentials_json: $("cfg-creds").value.trim(),
+    lms_api_url:      $("cfg-lms-url") ? $("cfg-lms-url").value.trim() : "",
+    lms_api_key:      $("cfg-lms-key") ? $("cfg-lms-key").value.trim() : "",
   };
   try {
     showOverlay("Menyimpan pengaturan...");
@@ -2581,6 +2601,31 @@ $("form-settings")?.addEventListener("submit", async e => {
     log("Gagal simpan pengaturan: " + err.message, "err");
   } finally { hideOverlay(); }
 });
+
+async function syncToLMS() {
+  const lmsUrl = $("cfg-lms-url")?.value.trim();
+  const lmsKey = $("cfg-lms-key")?.value.trim();
+  if (!lmsUrl || !lmsKey) {
+    alert("Silakan isi dan simpan LMS API URL Endpoint serta Bearer Token terlebih dahulu di menu Pengaturan!");
+    return;
+  }
+  if (!confirm("Kirim seluruh data master dan jadwal saat ini ke server LMS Laravel?")) return;
+  
+  try {
+    showOverlay("Mengirim data ke LMS...");
+    const res = await api("POST", "/api/sync/lms");
+    log(res.message || "Sinkronisasi ke LMS berhasil!", "ok");
+    alert(res.message || "Sinkronisasi ke LMS sukses!");
+  } catch (err) {
+    log("Gagal sinkronisasi LMS: " + err.message, "err");
+    alert("Gagal melakukan sinkronisasi ke LMS:\n" + err.message);
+  } finally {
+    hideOverlay();
+  }
+}
+
+$("btn-sync-lms")?.addEventListener("click", syncToLMS);
+$("btn-sync-lms-top")?.addEventListener("click", syncToLMS);
 
 $("btn-clear")?.addEventListener("click", async () => {
   if (!confirm("HAPUS SEMUA DATA? Tindakan ini tidak bisa dibatalkan!")) return;
@@ -2748,6 +2793,10 @@ function renderReport() {
   $("rep-g-kode").textContent = teacher.kode_guru;
   $("rep-g-load").textContent = `${load} JP`;
   
+  if ($("print-guru-nama")) $("print-guru-nama").textContent = teacher.nama_guru;
+  if ($("print-guru-kode")) $("print-guru-kode").textContent = teacher.kode_guru;
+  if ($("print-guru-load")) $("print-guru-load").textContent = `${load} JP`;
+  
   const minJp = teacher.min_jp ?? 2;
   const maxJp = teacher.max_jp ?? 60;
   $("rep-g-target").textContent = `Min: ${minJp} / Max: ${maxJp} JP`;
@@ -2770,6 +2819,16 @@ function renderReport() {
   // Shifts
   const shifts = [teacher.shift_pagi && "PAGI", teacher.shift_siang && "SIANG"].filter(Boolean).join(" & ") || "-";
   $("rep-g-shift").innerHTML = `<span class="badge ${teacher.shift_pagi ? 'badge-pagi' : 'badge-siang'}" style="font-size:.8rem;padding:4px 10px">${shifts}</span>`;
+  if ($("print-guru-shift")) $("print-guru-shift").textContent = shifts;
+
+  // Set print date and place
+  const printDatePlace = document.querySelector(".print-date-place");
+  if (printDatePlace) {
+    const branchName = (localStorage.getItem("active_branch") || "bekasi").toLowerCase();
+    const city = branchName === "jakarta" ? "Jakarta" : "Bekasi";
+    const today = new Date().toLocaleDateString("id-ID", { day: "numeric", month: "long", year: "numeric" });
+    printDatePlace.textContent = `${city}, ${today}`;
+  }
 
   // Guru Mutlak
   const mutlakCard = $("rep-g-mutlak-card");
@@ -2785,43 +2844,104 @@ function renderReport() {
     }
   }
 
-  // Render Visual Timetable Grid (Teacher View)
-  let gridHtml = "";
-  DAYS.forEach(day => {
-    // Find if the teacher has any class on this day
-    const dayEntries = entries.filter(e => e.hari === day);
-    if (dayEntries.length === 0) {
-      // Show day card as free
-      gridHtml += `<div class="day-card">
-        <h4>${day}</h4>
-        <div style="padding:15px;text-align:center;color:var(--muted);font-style:italic;font-size:.78rem">
-          <i class="fa-solid fa-circle-check" style="color:var(--success);margin-right:4px"></i> Hari Libur / Free
-        </div>
-      </div>`;
-      return;
-    }
+  // Render Visual Timetable Grid (Teacher View - Split into Pagi and Siang)
+  const SHIFT_LIMITS = {
+    PAGI:  {SENIN:7,SELASA:7,RABU:7,KAMIS:7,JUMAT:6,SABTU:7},
+    SIANG: {SENIN:7,SELASA:7,RABU:7,KAMIS:7,JUMAT:6,SABTU:6},
+  };
 
-    let dayHtml = `<div class="day-card"><h4>${day}</h4><div class="slot-list">`;
-    
-    // Sort chronologically by period
-    dayEntries.sort((a,b) => a.jam_ke - b.jam_ke);
-    dayEntries.forEach(e => {
-      const shift = e.shift_operasional; // PAGI or SIANG
-      const clock = getWallClockTime(e.hari, shift, e.jam_ke);
-      const fbClass = e.is_fallback ? ' fb' : ` ${shift.toLowerCase()}`;
-      dayHtml += `<div class="slot${fbClass}">
-        ${e.is_fallback ? '<span class="badge-fb">SUB</span>' : ''}
-        <div class="slot-top">
-          <span>JP ${e.jam_ke} (${shift})</span>
-          <span class="slot-time"><i class="fa-regular fa-clock"></i> ${clock}</span>
-        </div>
-        <div class="slot-mapel">${esc(e.nama_mapel)}</div>
-        <div class="slot-guru" style="font-weight:600;color:var(--text)"><i class="fa-solid fa-school"></i> Kelas: ${esc(e.nama_kelas)}</div>
-      </div>`;
+  const buildShiftGrid = (shiftName) => {
+    let html = "";
+    DAYS.forEach(day => {
+      const maxJP = SHIFT_LIMITS[shiftName]?.[day] || 0;
+      if (maxJP === 0) return;
+
+      const dayEntries = entries.filter(e => e.hari === day && e.shift_operasional === shiftName);
+      if (dayEntries.length === 0) {
+        html += `<div class="day-card">
+          <h4>${day}</h4>
+          <div style="padding:15px;text-align:center;color:var(--muted);font-style:italic;font-size:.78rem">
+            <i class="fa-solid fa-circle-check" style="color:var(--success);margin-right:4px"></i> Hari Libur / Free
+          </div>
+        </div>`;
+        return;
+      }
+
+      const dayMap = {};
+      dayEntries.forEach(e => { dayMap[e.jam_ke] = e; });
+
+      let dayHtml = `<div class="day-card"><h4>${day}</h4><div class="slot-list">`;
+      
+      for (let jp = 1; jp <= maxJP; jp++) {
+        // Upacara check (Senin JP 1 Pagi)
+        if (day === "SENIN" && jp === 1 && shiftName === "PAGI") {
+          dayHtml += `<div class="slot upacara pagi" style="background:rgba(6,182,212,.08);border:1px solid rgba(6,182,212,.25)">
+            <div class="slot-top"><span>JP 1 (UPACARA)</span><span class="slot-time"><i class="fa-regular fa-clock"></i> 06:30 - 07:30</span></div>
+            <div class="slot-mapel" style="color:var(--primary-h)">UPACARA BENDERA</div>
+            <div class="slot-guru">—</div>
+          </div>`;
+        } else {
+          const e = dayMap[jp];
+          if (!e) {
+            const clock = getWallClockTime(day, shiftName, jp);
+            dayHtml += `<div class="slot kosong ${shiftName.toLowerCase()}">
+              <div class="slot-top">
+                <span>JP ${jp}</span>
+                <span class="slot-time"><i class="fa-regular fa-clock"></i> ${clock}</span>
+              </div>
+              <div class="slot-mapel" style="color:var(--muted);font-style:italic">KOSONG</div>
+            </div>`;
+          } else {
+            const clock = getWallClockTime(e.hari, shiftName, e.jam_ke);
+            const fbClass = e.is_fallback ? ' fb' : ` ${shiftName.toLowerCase()}`;
+            dayHtml += `<div class="slot${fbClass}">
+              ${e.is_fallback ? '<span class="badge-fb">SUB</span>' : ''}
+              <div class="slot-top">
+                <span>JP ${e.jam_ke}</span>
+                <span class="slot-time"><i class="fa-regular fa-clock"></i> ${clock}</span>
+              </div>
+              <div class="slot-mapel">${esc(e.nama_mapel)}</div>
+              <div class="slot-guru" style="font-weight:600;color:var(--text)"><i class="fa-solid fa-school"></i> Kelas: ${esc(e.nama_kelas)}</div>
+            </div>`;
+          }
+        }
+
+        // Insert ISTIRAHAT card inside the list for all days after JP 4
+        if (jp === 4) {
+          const breakTime = shiftName === "PAGI" ? (day === "SENIN" ? "09:30 - 10:00" : "10:00 - 10:30") : (day === "JUMAT" ? "15:40 - 16:00" : "15:45 - 16:15");
+          dayHtml += `<div class="slot break" style="background:rgba(245,158,11,.1);border:1px dashed var(--warn);color:var(--warn)">
+            <div class="slot-top" style="color:var(--warn)">
+              <span>ISTIRAHAT</span>
+              <span class="slot-time"><i class="fa-regular fa-clock"></i> ${breakTime}</span>
+            </div>
+            <div class="slot-mapel" style="color:var(--warn);font-size:.76rem;font-weight:600">ISTIRAHAT</div>
+          </div>`;
+        }
+      }
+
+      dayHtml += `</div></div>`;
+      html += dayHtml;
     });
-    dayHtml += `</div></div>`;
-    gridHtml += dayHtml;
-  });
+    return html;
+  };
+
+  const pagiHtml = buildShiftGrid("PAGI");
+  const siangHtml = buildShiftGrid("SIANG");
+
+  const gridHtml = `
+    <div class="shift-section" style="margin-bottom:20px">
+      <div style="font-size:0.75rem; font-weight:700; color:var(--muted); margin-bottom:8px; display:flex; align-items:center; gap:6px; text-transform:uppercase; letter-spacing:0.5px">
+        <i class="fa-solid fa-cloud-sun" style="color:var(--primary);font-size:0.85rem"></i> Shift Pagi (06.30 - 12.00)
+      </div>
+      <div class="tt-grid">${pagiHtml}</div>
+    </div>
+    <div class="shift-section" style="margin-bottom:10px">
+      <div style="font-size:0.75rem; font-weight:700; color:var(--muted); margin-bottom:8px; display:flex; align-items:center; gap:6px; text-transform:uppercase; letter-spacing:0.5px">
+        <i class="fa-solid fa-sun" style="color:var(--info);font-size:0.85rem"></i> Shift Siang (12.30 - 17.45)
+      </div>
+      <div class="tt-grid">${siangHtml}</div>
+    </div>
+  `;
 
   $("rep-grid").innerHTML = gridHtml;
 
@@ -2832,12 +2952,15 @@ function renderReport() {
     return;
   }
 
-  // Sort entries chronologically: Day index, then period
+  // Sort entries chronologically: Day index, shift (PAGI first, then SIANG), then period
   const dayWeight = { "SENIN":1, "SELASA":2, "RABU":3, "KAMIS":4, "JUMAT":5, "SABTU":6 };
   const sortedEntries = [...entries].sort((a, b) => {
     const wA = dayWeight[a.hari] || 9;
     const wB = dayWeight[b.hari] || 9;
     if (wA !== wB) return wA - wB;
+    if (a.shift_operasional !== b.shift_operasional) {
+      return a.shift_operasional === "PAGI" ? -1 : 1;
+    }
     return a.jam_ke - b.jam_ke;
   });
 
@@ -2860,6 +2983,78 @@ function renderReport() {
 
 // Hook select dropdown change
 $("select-report-guru")?.addEventListener("change", renderReport);
+
+$("btn-print-report")?.addEventListener("click", () => {
+  window.print();
+});
+
+$("btn-send-wa")?.addEventListener("click", () => {
+  const selectedTeacherId = $("select-report-guru")?.value;
+  if (!selectedTeacherId) return;
+  const tid = parseInt(selectedTeacherId);
+  const teacher = state.teachers.find(t => t.id_guru === tid);
+  if (!teacher) return;
+
+  if (!teacher.no_wa) {
+    alert(`Nomor WhatsApp untuk ${teacher.nama_guru} belum diisi. Silakan isi terlebih dahulu di tab Data Master.`);
+    return;
+  }
+
+  // Get timetable entries
+  const entries = state.timetable.filter(e => e.id_guru === tid);
+  if (entries.length === 0) {
+    alert("Guru ini tidak memiliki jadwal mengajar minggu ini.");
+    return;
+  }
+
+  // Build the message
+  let msg = `Halo *${teacher.nama_guru}*,\nBerikut adalah Jadwal Mengajar Mingguan Anda:\n\n`;
+
+  // Sort and group by day
+  const dayWeight = { "SENIN":1, "SELASA":2, "RABU":3, "KAMIS":4, "JUMAT":5, "SABTU":6 };
+  const sortedEntries = [...entries].sort((a, b) => {
+    const wA = dayWeight[a.hari] || 9;
+    const wB = dayWeight[b.hari] || 9;
+    if (wA !== wB) return wA - wB;
+    if (a.shift_operasional !== b.shift_operasional) return a.shift_operasional === "PAGI" ? -1 : 1;
+    return a.jam_ke - b.jam_ke;
+  });
+
+  const grouped = {};
+  sortedEntries.forEach(e => {
+    if (!grouped[e.hari]) grouped[e.hari] = [];
+    grouped[e.hari].push(e);
+  });
+
+  const DAYS_ORDER = ["SENIN", "SELASA", "RABU", "KAMIS", "JUMAT", "SABTU"];
+  DAYS_ORDER.forEach(day => {
+    const dayEntries = grouped[day] || [];
+    if (dayEntries.length === 0) {
+      msg += `*${day}*:\n- _Libur / Free_\n\n`;
+    } else {
+      msg += `*${day}*:\n`;
+      dayEntries.forEach(e => {
+        const clock = getWallClockTime(e.hari, e.shift_operasional, e.jam_ke);
+        msg += `- JP ${e.jam_ke} (${clock}): ${e.nama_mapel} - Kelas ${e.nama_kelas} (${e.shift_operasional})\n`;
+      });
+      msg += `\n`;
+    }
+  });
+
+  msg += `Total beban mengajar: *${entries.length} JP*\n`;
+  msg += `_Dikirim otomatis via Sistem SITAB_`;
+
+  // Clean WhatsApp number
+  const cleanNum = String(teacher.no_wa).replace(/\D/g, "");
+  let formattedNum = cleanNum;
+  if (cleanNum.startsWith("0")) {
+    formattedNum = "62" + cleanNum.slice(1);
+  }
+
+  const url = `https://wa.me/${formattedNum}?text=${encodeURIComponent(msg)}`;
+  window.open(url, "_blank");
+});
+
 async function downloadTimetableExcel() {
   if (!state.timetable || state.timetable.length === 0) {
     alert("Belum ada data jadwal. Generate jadwal terlebih dahulu.");

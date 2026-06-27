@@ -139,13 +139,15 @@ def _import_data_to_db(rows_guru, rows_kelas, rows_mapel, rows_alokasi, rows_pen
                 except Exception:
                     pass
 
+            no_wa = str(r.get("no_wa", "")).strip() if r.get("no_wa") not in (None, "") else None
+
             cur.execute("""
                 INSERT INTO teachers
                     (nama_guru, kode_guru, hari_tersedia,
                      shift_pagi, shift_siang,
                      hari_tersedia_pagi, hari_tersedia_siang, min_jp, max_jp,
-                     allowed_jp_pagi, allowed_jp_siang)
-                VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                     allowed_jp_pagi, allowed_jp_siang, no_wa)
+                VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
             """, (
                 nama,
                 int(r.get("kode_guru")),
@@ -154,7 +156,8 @@ def _import_data_to_db(rows_guru, rows_kelas, rows_mapel, rows_alokasi, rows_pen
                 json.dumps(hari_pagi),
                 json.dumps(hari_siang),
                 min_jp, max_jp,
-                allowed_jp_pagi, allowed_jp_siang
+                allowed_jp_pagi, allowed_jp_siang,
+                no_wa
             ))
 
         # ── 2. Kelas (Tab B) ────────────────────────────────────────
@@ -563,6 +566,8 @@ def import_teachers_from_excel(file_bytes):
                 except Exception:
                     pass
 
+            no_wa = str(r.get("no_wa", "")).strip() if r.get("no_wa") not in (None, "") else None
+
             # Check if exists to determine insert vs update
             cur.execute("SELECT id_guru FROM teachers WHERE kode_guru = %s", (kode,))
             exists = cur.fetchone()
@@ -572,8 +577,8 @@ def import_teachers_from_excel(file_bytes):
                     (nama_guru, kode_guru, hari_tersedia,
                      shift_pagi, shift_siang,
                      hari_tersedia_pagi, hari_tersedia_siang, min_jp, max_jp,
-                     allowed_jp_pagi, allowed_jp_siang)
-                VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                     allowed_jp_pagi, allowed_jp_siang, no_wa)
+                VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
                 ON CONFLICT (kode_guru) DO UPDATE SET
                     nama_guru = EXCLUDED.nama_guru,
                     hari_tersedia = EXCLUDED.hari_tersedia,
@@ -584,13 +589,15 @@ def import_teachers_from_excel(file_bytes):
                     min_jp = EXCLUDED.min_jp,
                     max_jp = EXCLUDED.max_jp,
                     allowed_jp_pagi = COALESCE(EXCLUDED.allowed_jp_pagi, teachers.allowed_jp_pagi),
-                    allowed_jp_siang = COALESCE(EXCLUDED.allowed_jp_siang, teachers.allowed_jp_siang)
+                    allowed_jp_siang = COALESCE(EXCLUDED.allowed_jp_siang, teachers.allowed_jp_siang),
+                    no_wa = EXCLUDED.no_wa
             """, (
                 nama, kode, json.dumps(hari),
                 shift_pagi, shift_siang,
                 json.dumps(hari_pagi), json.dumps(hari_siang),
                 min_jp, max_jp,
-                allowed_jp_pagi, allowed_jp_siang
+                allowed_jp_pagi, allowed_jp_siang,
+                no_wa
             ))
             if exists:
                 update_count += 1
