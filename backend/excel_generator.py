@@ -112,7 +112,7 @@ def generate_excel_timetable() -> tuple[io.BytesIO, str]:
     conn = get_db_connection()
     try:
         classes = db_fetchall(conn, "SELECT * FROM classes ORDER BY nama_kelas")
-        teachers = db_fetchall(conn, "SELECT * FROM teachers ORDER BY nama_guru")
+        teachers = db_fetchall(conn, "SELECT * FROM teachers ORDER BY kode_guru")
         subjects = db_fetchall(conn, "SELECT * FROM subjects ORDER BY nama_mapel")
         
         allocations = db_fetchall(conn, """
@@ -540,7 +540,7 @@ def generate_excel_timetable() -> tuple[io.BytesIO, str]:
     ))
 
     n_classes = len(sorted_classes)
-    col_p = 5 + n_classes      # Col index for P (1-based, index 4 is Mapel, then n_classes cols)
+    col_p = 6 + n_classes      # Col index for P (1-based, index 5 is Mapel, then n_classes cols)
     col_s = col_p + 1
     col_jm = col_p + 2
     total_cols_m = col_jm
@@ -556,7 +556,7 @@ def generate_excel_timetable() -> tuple[io.BytesIO, str]:
     ws_m.row_dimensions[2].height = 6
 
     # Build Header level 1 (Tingkat: Kelas X, Kelas XI, Kelas XII)
-    hdr1 = ["No", "Nama Guru", "Jabatan", "Mapel"]
+    hdr1 = ["No", "Nama Guru", "Kode Guru", "Jabatan", "Mapel"]
     tingkat_groups = {}
     for idx, cls in enumerate(sorted_classes):
         p = parse_kelas(cls["nama_kelas"])
@@ -570,7 +570,7 @@ def generate_excel_timetable() -> tuple[io.BytesIO, str]:
     
     # Merge label tingkat in header Row 3
     for tgt, info in tingkat_groups.items():
-        col_start = 5 + info["start"]
+        col_start = 6 + info["start"]
         col_end = col_start + info["count"] - 1
         ws_m.cell(row=3, column=col_start, value=f"Kelas {tgt}")
         style_range(ws_m, start_row=3, start_col=col_start, end_row=3, end_col=col_end, border=border_cell, fill=fill_header, font=font_header_label, alignment=align_center)
@@ -578,7 +578,7 @@ def generate_excel_timetable() -> tuple[io.BytesIO, str]:
             ws_m.merge_cells(start_row=3, start_column=col_start, end_row=3, end_column=col_end)
 
     # Build Header level 2 (Jurusan)
-    hdr2 = ["", "", "", ""]
+    hdr2 = ["", "", "", "", ""]
     jurusan_groups = {}
     for idx, cls in enumerate(sorted_classes):
         p = parse_kelas(cls["nama_kelas"])
@@ -592,7 +592,7 @@ def generate_excel_timetable() -> tuple[io.BytesIO, str]:
     
     # Merge label jurusan in header Row 4
     for info in jurusan_groups.values():
-        col_start = 5 + info["start"]
+        col_start = 6 + info["start"]
         col_end = col_start + info["count"] - 1
         ws_m.cell(row=4, column=col_start, value=info["jurusan"])
         style_range(ws_m, start_row=4, start_col=col_start, end_row=4, end_col=col_end, border=border_cell, fill=fill_header, font=font_header_label, alignment=align_center)
@@ -600,7 +600,7 @@ def generate_excel_timetable() -> tuple[io.BytesIO, str]:
             ws_m.merge_cells(start_row=4, start_column=col_start, end_row=4, end_column=col_end)
 
     # Build Header level 3 (Rombel/Nomor kelas)
-    hdr3 = ["No", "Nama Guru", "Jabatan", "Mapel"]
+    hdr3 = ["No", "Nama Guru", "Kode Guru", "Jabatan", "Mapel"]
     for cls in sorted_classes:
         hdr3.append(parse_kelas(cls["nama_kelas"])["rombel"])
     hdr3.extend(["P", "S", "JM"])
@@ -608,15 +608,15 @@ def generate_excel_timetable() -> tuple[io.BytesIO, str]:
     
     # Style header Row 5 class numbers
     for idx in range(len(sorted_classes)):
-        c_idx = 5 + idx
+        c_idx = 6 + idx
         ws_m.cell(row=5, column=c_idx).font = font_header_label
         ws_m.cell(row=5, column=c_idx).fill = fill_header
         ws_m.cell(row=5, column=c_idx).border = border_cell
         ws_m.cell(row=5, column=c_idx).alignment = align_center
 
-    # Merge vertical headers (No, Nama Guru, Jabatan, Mapel, P, S, JM) across Rows 3 to 5
+    # Merge vertical headers (No, Nama Guru, Kode Guru, Jabatan, Mapel, P, S, JM) across Rows 3 to 5
     vertical_headers = [
-        (1, "No"), (2, "Nama Guru"), (3, "Jabatan"), (4, "Mapel"),
+        (1, "No"), (2, "Nama Guru"), (3, "Kode Guru"), (4, "Jabatan"), (5, "Mapel"),
         (col_p, "P"), (col_s, "S"), (col_jm, "JM")
     ]
     for c_idx, label in vertical_headers:
@@ -713,6 +713,7 @@ def generate_excel_timetable() -> tuple[io.BytesIO, str]:
             row_data = [
                 guru_no if gi == 0 else "",
                 teacher["nama_guru"] if gi == 0 else "",
+                teacher["kode_guru"] if gi == 0 else "",
                 jabatan if gi == 0 else "",
                 tr["nama_mapel"]
             ]
@@ -733,9 +734,9 @@ def generate_excel_timetable() -> tuple[io.BytesIO, str]:
                 cell = ws_m.cell(row=row_idx, column=c)
                 cell.border = border_cell
                 cell.font = font_data_normal
-                if c in (1, 3, col_p, col_s, col_jm) or (5 <= c <= 4 + n_classes):
+                if c in (1, 3, 4, col_p, col_s, col_jm) or (6 <= c <= 5 + n_classes):
                     cell.alignment = align_center
-                elif c in (2, 4):
+                elif c in (2, 5):
                     cell.alignment = Alignment(horizontal="left", vertical="center")
             
             row_idx += 1
@@ -743,8 +744,8 @@ def generate_excel_timetable() -> tuple[io.BytesIO, str]:
         # Merge vertical fields for teacher identity & P, S, JM values
         if len(teacher_rows) > 1:
             guru_row_end = row_idx - 1
-            # Merge No, Name, Position
-            for c_idx in (1, 2, 3):
+            # Merge No, Name, Kode Guru, Position
+            for c_idx in (1, 2, 3, 4):
                 style_range(ws_m, start_row=guru_row_start, start_col=c_idx, end_row=guru_row_end, end_col=c_idx, 
                             border=border_cell, alignment=align_center if c_idx != 2 else Alignment(horizontal="left", vertical="center"))
                 ws_m.merge_cells(start_row=guru_row_start, start_column=c_idx, end_row=guru_row_end, end_column=c_idx)
@@ -761,7 +762,7 @@ def generate_excel_timetable() -> tuple[io.BytesIO, str]:
         guru_no += 1
 
     # ── 4. Footer Row (JUMLAH JAM PER MINGGU) ──
-    foot_row = ["", "JUMLAH JAM PER MINGGU", "", ""]
+    foot_row = ["", "JUMLAH JAM PER MINGGU", "", "", ""]
     tot_p = 0
     tot_s = 0
     
@@ -781,13 +782,13 @@ def generate_excel_timetable() -> tuple[io.BytesIO, str]:
     ws_m.append(foot_row)
     ws_m.row_dimensions[row_idx].height = 22
     
-    # Merge label "JUMLAH JAM PER MINGGU" across Cols B to D
-    style_range(ws_m, start_row=row_idx, start_col=2, end_row=row_idx, end_col=4, border=border_cell, fill=fill_header, font=font_header_label, alignment=align_center)
-    ws_m.merge_cells(start_row=row_idx, start_column=2, end_row=row_idx, end_column=4)
+    # Merge label "JUMLAH JAM PER MINGGU" across Cols B to E
+    style_range(ws_m, start_row=row_idx, start_col=2, end_row=row_idx, end_col=5, border=border_cell, fill=fill_header, font=font_header_label, alignment=align_center)
+    ws_m.merge_cells(start_row=row_idx, start_column=2, end_row=row_idx, end_column=5)
     
     # Style remaining cells in the footer
     ws_m.cell(row=row_idx, column=1).border = border_cell
-    for c in range(5, total_cols_m + 1):
+    for c in range(6, total_cols_m + 1):
         cell = ws_m.cell(row=row_idx, column=c)
         cell.border = border_cell
         cell.fill = fill_header
@@ -797,11 +798,12 @@ def generate_excel_timetable() -> tuple[io.BytesIO, str]:
     # Column Widths
     ws_m.column_dimensions['A'].width = 5   # No
     ws_m.column_dimensions['B'].width = 28  # Nama Guru
-    ws_m.column_dimensions['C'].width = 16  # Jabatan
-    ws_m.column_dimensions['D'].width = 26  # Mapel
+    ws_m.column_dimensions['C'].width = 12  # Kode Guru
+    ws_m.column_dimensions['D'].width = 16  # Jabatan
+    ws_m.column_dimensions['E'].width = 26  # Mapel
     
     for i in range(n_classes):
-        ws_m.column_dimensions[get_column_letter(5 + i)].width = 5  # Kelas cols
+        ws_m.column_dimensions[get_column_letter(6 + i)].width = 5  # Kelas cols
     ws_m.column_dimensions[get_column_letter(col_p)].width = 6      # P
     ws_m.column_dimensions[get_column_letter(col_s)].width = 6      # S
     ws_m.column_dimensions[get_column_letter(col_jm)].width = 7     # JM
