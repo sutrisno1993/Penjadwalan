@@ -44,6 +44,7 @@ from backend.solver import generate_timetable, _diagnose_infeasibility, _preflig
 from backend.sheets import (
     pull_master_data, export_timetable_to_sheet, pull_excel_data,
     import_teachers_from_excel, import_subjects_from_excel, import_teacher_subjects_from_excel,
+    import_teachers_whatsapp_from_excel,
 )
 from backend.excel_generator import generate_excel_timetable
 
@@ -320,6 +321,14 @@ async def upload_teachers_excel(file: UploadFile = File(...)):
     try:
         contents = await file.read()
         return import_teachers_from_excel(contents)
+    except Exception as e:
+        raise HTTPException(500, str(e))
+
+@app.post("/api/teachers/upload-whatsapp")
+async def upload_teachers_whatsapp_excel(file: UploadFile = File(...)):
+    try:
+        contents = await file.read()
+        return import_teachers_whatsapp_from_excel(contents)
     except Exception as e:
         raise HTTPException(500, str(e))
 

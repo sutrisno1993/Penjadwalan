@@ -2388,6 +2388,35 @@ $("input-excel-guru")?.addEventListener("change", async (e) => {
   }
 });
 
+// 1b. Upload No HP Guru
+$("btn-upload-excel-no-hp")?.addEventListener("click", () => {
+  $("input-excel-no-hp").click();
+});
+$("input-excel-no-hp")?.addEventListener("change", async (e) => {
+  const file = e.target.files[0];
+  if (!file) return;
+  
+  showOverlay("Mengunggah data nomor HP guru...");
+  log(`Mengunggah file No HP guru: ${file.name}...`, "info");
+  
+  const formData = new FormData();
+  formData.append("file", file);
+  
+  try {
+    const data = await apiUpload("/api/teachers/upload-whatsapp", formData);
+    
+    log(`Update No HP guru selesai! Diperbarui: ${data.updated || 0}`, "ok");
+    (data.errors || []).forEach(err => log(err, "err"));
+    
+    await loadTeachers();
+  } catch (err) {
+    log("Error upload No HP Guru: " + err.message, "err");
+  } finally {
+    e.target.value = "";
+    hideOverlay();
+  }
+});
+
 // 2. Upload Mapel
 $("btn-upload-excel-mapel")?.addEventListener("click", () => {
   $("input-excel-mapel").click();

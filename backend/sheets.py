@@ -759,6 +759,8 @@ def import_teacher_subjects_from_excel(file_bytes):
                 except Exception:
                     pass
             
+                    pass
+            
             if inserted_any:
                 success_count += 1
                 
@@ -774,3 +776,112 @@ def import_teacher_subjects_from_excel(file_bytes):
     finally:
         cur.close()
         conn.close()
+
+
+def import_teachers_whatsapp_from_excel(file_bytes):
+    try:
+        wb = openpyxl.load_workbook(io.BytesIO(file_bytes), data_only=True)
+    except Exception as e:
+        raise ValueError(f"Gagal membaca file Excel: {e}")
+    
+    ws = wb.active
+    rows = list(ws.values)
+    if not rows or len(rows) < 2:
+        raise ValueError("Sheet kosong atau tidak memiliki data.")
+    
+    headers = [str(h).strip().lower() if h else "" for h in rows[0]]
+    
+    code_aliases = ['kode_guru', 'kode', 'id', 'kode guru', 'id_guru', 'id guru', 'gurucode']
+    phone_aliases = ['no_wa', 'no_hp', 'no hp', 'whatsapp', 'wa', 'telp', 'no. wa', 'no. hp', 'nomor hp', 'nomor wa', 'handphone', 'phone', 'no_telp', 'no telp']
+    
+    code_idx = -1
+    phone_idx = -1
+    
+    for idx, h in enumerate(headers):
+        h_clean = h.replace('_', ' ').replace('.', ' ').strip()
+        if h in code_aliases or h_clean in code_aliases:
+            code_idx = idx
+        elif h in phone_aliases or h_clean in phone_aliases:
+            phone_idx = idx
+            
+    # Fallback search
+    if code_idx == -1:
+        for idx, h in enumerate(headers):
+            if 'kode' in h or 'id' in h:
+                code_idx = idx
+                break
+    if phone_idx == -1:
+        for idx, h in enumerate(headers):
+            if 'hp' in h or 'wa' in h or 'telp' in h or 'phone' in h or 'nomor' in h:
+                phone_idx = idx
+                break
+                
+    if code_idx == -1 or phone_idx == -1:
+        raise ValueError("Kolom 'Kode Guru' atau 'No HP/WA' tidak ditemukan di baris pertama Excel.")
+        
+    conn = get_db_connection()
+    cur = conn.cursor()
+    success_count = 0
+    errors = []
+    
+    try:
+        for idx, row in enumerate(rows[1:], start=2):
+            if all(cell is None or str(cell).strip() == "" for cell in row):
+                continue
+                
+            kode_val = row[code_idx]
+            phone_val = row[phone_idx]
+            
+            if kode_val is None or str(kode_val).strip() == "":
+                errors.append(f"Baris {idx}: Kode guru kosong.")
+                continue
+                
+            try:
+                kode = int(float(str(kode_val).strip()))
+            except (ValueError, TypeError):
+                errors.append(f"Baris {idx}: Kode guru '{kode_val}' bukan angka.")
+                continue
+                
+            if phone_val is None or str(phone_val).strip() == "":
+                continue
+                
+            # Clean phone number
+            phone_str = str(phone_val).strip().replace(" ", "").replace("-", "").replace("(", "").replace(")", "")
+            if phone_str.endswith(".0"):
+                phone_str = phone_str[:-2]
+            if isinstance(phone_val, (float, int)):
+                phone_str = str(int(phone_val))
+                
+            # Cek apakah guru terdaftar
+            cur.execute("SELECT id_guru, no_wa, nama_guru FROM teachers WHERE kode_guru = %s", (kode,))
+            teacher = cur.fetchone()
+            
+            if not teacher:
+                errors.append(f"Baris {idx}: Kode guru {kode} tidak ditemukan di database.")
+                continue
+                
+            # Update
+            try:
+                cur.execute("UPDATE teachers SET no_wa = %s WHERE id_guru = %s", (phone_str, teacher["id_guru"]))
+                conn.commit()
+                success_count += 1
+            except Exception as e:
+                conn.rollback()
+                err_msg = str(e)
+                if "Duplicate entry" in err_msg or "1062" in err_msg:
+                    errors.append(f"Baris {idx}: No HP/WA '{phone_str}' sudah digunakan oleh guru lain.")
+                else:
+                    errors.append(f"Baris {idx}: Gagal memperbarui No HP/WA ({err_msg}).")
+                    
+        return {
+            "status": "SUCCESS" if not errors else "PARTIAL",
+            "updated": success_count,
+            "errors": errors
+        }
+    except Exception as e:
+        conn.rollback()
+        raise e
+    finally:
+        cur.close()
+        conn.close()
+
