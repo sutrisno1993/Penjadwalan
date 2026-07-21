@@ -19,7 +19,7 @@ try:
             hari_tersedia = %s,
             min_jp = NULL,
             max_jp = NULL
-        WHERE id_guru = 13
+        WHERE kode_guru = 13
     """, (json.dumps(hari_pagi), json.dumps(hari_siang), json.dumps(hari_pagi)))
     
     conn.commit()

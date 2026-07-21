@@ -1,52 +1,46 @@
 import sys
-import json
-sys.path.insert(0, 'd:/Jadwal')
-from dotenv import load_dotenv
-load_dotenv('d:/Jadwal/.env')
+import os
 
-from backend.database import get_db_connection, active_branch, db_fetchall
+sys.stdout.reconfigure(encoding='utf-8')
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+from backend.database import get_db_connection
+from backend.solver import _fetch_master_data, _preflight, _diagnose_infeasibility
 
 def main():
-    active_branch.set("bekasi")
-    conn = get_db_connection()
-    try:
-        teachers = db_fetchall(conn, "SELECT * FROM teachers")
-        classes = db_fetchall(conn, "SELECT * FROM classes")
-        allocations = db_fetchall(conn, """
-            SELECT cs.*, c.nama_kelas, c.shift_operasional, s.nama_mapel, s.kategori_mapel
-            FROM class_subjects cs
-            JOIN classes c ON cs.id_kelas = c.id_kelas
-            JOIN subjects s ON cs.id_mapel = s.id_mapel
-        """)
-        
-        teachers_map = {t["id_guru"]: t for t in teachers}
-        for t in teachers:
-            t["hari_tersedia_pagi"] = json.loads(t["hari_tersedia_pagi"] or "[]")
-            t["hari_tersedia_siang"] = json.loads(t["hari_tersedia_siang"] or "[]")
-            
-        print("=== DETIL ALOKASI TERKUNCI PER GURU ===")
-        for t in teachers:
-            tid = t["id_guru"]
-            t_allocs = [a for a in allocations if a["id_guru_mutlak"] == tid]
-            if not t_allocs:
-                continue
-            
-            print(f"\nGuru: {t['nama_guru']} (ID {tid}, Max JP {t['max_jp']})")
-            pagi_allocs = [a for a in t_allocs if a["shift_operasional"] == "PAGI"]
-            siang_allocs = [a for a in t_allocs if a["shift_operasional"] == "SIANG"]
-            
-            pagi_jp = sum(a["durasi_jp"] for a in pagi_allocs)
-            siang_jp = sum(a["durasi_jp"] for a in siang_allocs)
-            
-            print(f"  PAGI: {pagi_jp} JP")
-            for a in pagi_allocs:
-                print(f"    - {a['nama_kelas']} | {a['nama_mapel']} ({a['durasi_jp']} JP)")
-            print(f"  SIANG: {siang_jp} JP")
-            for a in siang_allocs:
-                print(f"    - {a['nama_kelas']} | {a['nama_mapel']} ({a['durasi_jp']} JP)")
-                
-    finally:
-        conn.close()
+    print("Fetching master data from current database in .env...")
+    teachers, classes, subjects_map, allocations, ts_set = _fetch_master_data()
 
-if __name__ == "__main__":
+    print(f"\n--- DATA MASTER SUMMARY ---")
+    print(f"Total Teachers    : {len(teachers)}")
+    print(f"Total Classes     : {len(classes)}")
+    print(f"Total Allocations : {len(allocations)}")
+    print(f"Total Subjects    : {len(subjects_map)}")
+
+    # 1. Run Preflight
+    print("\n--- 1. RUNNING PREFLIGHT DIAGNOSIS ---")
+    warnings, hard_errors = _preflight(teachers, classes, allocations, ts_set, subjects_map)
+    
+    if hard_errors:
+        print("\n❌ HARD ERRORS (Inisialisasi Solver Gagal):")
+        for idx, err in enumerate(hard_errors, 1):
+            print(f"  {idx}. {err}")
+    else:
+        print("\n✅ Tidak ada Hard Error pada Preflight!")
+
+    if warnings:
+        print(f"\n⚠️ WARNINGS ({len(warnings)} peringatan):")
+        for idx, w in enumerate(warnings, 1):
+            print(f"  {idx}. {w}")
+
+    # 2. Run Infeasibility Diagnosis
+    print("\n--- 2. RUNNING INFEASIBILITY DIAGNOSIS ---")
+    diag_recs = _diagnose_infeasibility(teachers, classes, allocations, ts_set, subjects_map)
+    if diag_recs:
+        print(f"\n❌ TEMUAN ANALISIS SOLVER ({len(diag_recs)} penyebab utama gagal generate):")
+        for idx, r in enumerate(diag_recs, 1):
+            print(f"  {idx}. [{r.get('type')}] {r.get('message')}")
+    else:
+        print("\n✅ Diagnosa awal tidak menemukan bentrok fatal.")
+
+if __name__ == '__main__':
     main()

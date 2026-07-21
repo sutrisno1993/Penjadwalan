@@ -6,6 +6,7 @@ Guru dipilih dari pool teacher_subjects (pool-based, bukan fixed-guru).
 """
 import json
 import logging
+import math
 from ortools.sat.python import cp_model
 from backend.database import get_db_connection, db_fetchall
 
@@ -36,6 +37,11 @@ def _is_olahraga(nama_mapel: str, kategori_mapel: str) -> bool:
 
 
 def _is_produktif(nama_mapel: str, kategori_mapel: str) -> bool:
+    k = (kategori_mapel or "").upper()
+    if k == "PRODUKTIF":
+        return True
+    if k == "UMUM" or k == "OLAHRAGA":
+        return False
     if _is_olahraga(nama_mapel, kategori_mapel):
         return False
     GENERAL = [
@@ -85,8 +91,10 @@ def _fetch_master_data():
             t["hari_tersedia"]       = json.loads(t["hari_tersedia"] or "[]") or []
             t["shift_pagi"]          = bool(t["shift_pagi"])
             t["shift_siang"]         = bool(t["shift_siang"])
-            t["hari_tersedia_pagi"]  = (json.loads(t["hari_tersedia_pagi"]) if t.get("hari_tersedia_pagi") else None) or list(t["hari_tersedia"])
-            t["hari_tersedia_siang"] = (json.loads(t["hari_tersedia_siang"]) if t.get("hari_tersedia_siang") else None) or list(t["hari_tersedia"])
+            pagi_val  = json.loads(t["hari_tersedia_pagi"])  if t.get("hari_tersedia_pagi")  is not None else None
+            siang_val = json.loads(t["hari_tersedia_siang"]) if t.get("hari_tersedia_siang") is not None else None
+            t["hari_tersedia_pagi"]  = pagi_val  if pagi_val  is not None else list(t["hari_tersedia"])
+            t["hari_tersedia_siang"] = siang_val if siang_val is not None else list(t["hari_tersedia"])
             t["allowed_jp_pagi"]     = json.loads(t["allowed_jp_pagi"]) if t.get("allowed_jp_pagi") else None
             t["allowed_jp_siang"]    = json.loads(t["allowed_jp_siang"]) if t.get("allowed_jp_siang") else None
 
@@ -120,7 +128,7 @@ def _fetch_master_data():
 # Pre-flight checks (Blueprint §6 Tahap 1)
 # ─────────────────────────────────────────────
 
-def _preflight(teachers, classes, allocations, ts_set, subjects_map=None):
+def _preflight(teachers, classes, allocations, ts_set, subjects_map=None, max_jp_darurat=4, split_multi_subject=True, multi_subject_jp_threshold=4):
     errors   = []
     warnings = []
 
@@ -212,6 +220,66 @@ def _preflight(teachers, classes, allocations, ts_set, subjects_map=None):
                 f"Guru Mutlak [{t['nama_guru']}] dikunci untuk total {locked_jp} JP pada shift {shift}, "
                 f"tetapi hari ketersediaannya ({', '.join(avail_days)}) hanya menampung maksimal {max_slots} JP."
             )
+
+    # 4b. Batas Maksimal 4 JP/Hari Per Guru Per Kelas Check (Hard Constraint)
+    class_teacher_locked = {}
+    for a in allocations:
+        id_fixed = a.get("id_guru_mutlak")
+        if id_fixed:
+            class_teacher_locked.setdefault((a["id_kelas"], id_fixed), []).append(a)
+
+    for (cid, tid), allocs_ct in class_teacher_locked.items():
+        tot_jp = sum(a["durasi_jp"] for a in allocs_ct)
+        t = teachers_map.get(tid)
+        kelas_nama = next((c["nama_kelas"] for c in classes if c["id_kelas"] == cid), str(cid))
+        if t and tot_jp > 0:
+            shift = next((c["shift_operasional"] for c in classes if c["id_kelas"] == cid), "PAGI")
+            avail_days = t["hari_tersedia_pagi"] if shift == "PAGI" else t["hari_tersedia_siang"]
+            max_in_class = len(avail_days) * max_jp_darurat
+            if tot_jp > max_in_class:
+                min_days = math.ceil(tot_jp / max_jp_darurat)
+                needed_days = min_days - len(avail_days)
+                excess_jp = tot_jp - max_in_class
+                errors.append(
+                    f"⛔ Guru Mutlak [{t['nama_guru']}] di Kelas [{kelas_nama}] mengampu total {tot_jp} JP, "
+                    f"tetapi hanya memiliki {len(avail_days)} hari ketersediaan ({', '.join(avail_days) or 'Tidak Ada'}).\n"
+                    f"   • Batas maksimal mengajar di 1 kelas adalah {max_jp_darurat} JP/hari (Hard Constraint).\n"
+                    f"   💡 REKOMENDASI SOLUSI FORMASI:\n"
+                    f"     1. (Tambah Hari Guru) Tambahkan ketersediaan hari {t['nama_guru']} minimal {needed_days} hari lagi (butuh minimal {min_days} hari).\n"
+                    f"     2. (Kurangi Jam Alokasi) Kurangi beban alokasi jam mengajar {t['nama_guru']} di Kelas [{kelas_nama}] sebanyak {excess_jp} JP.\n"
+                    f"     3. (Ubah Guru Pengampu) Lepas status Guru Mutlak atau bagikan sebagian jam ke guru lain yang memiliki kualifikasi di Tab 5."
+                )
+
+    # 4c. Pemisahan Hari untuk Guru Multi-Mapel di Kelas Sama Check
+    if split_multi_subject:
+        class_teacher_locked_multi = {}
+        for a in allocations:
+            id_fixed = a.get("id_guru_mutlak")
+            if id_fixed:
+                class_teacher_locked_multi.setdefault((a["id_kelas"], id_fixed), []).append(a)
+
+        for (cid, tid), allocs_ct in class_teacher_locked_multi.items():
+            if len(allocs_ct) >= 2:
+                tot_jp = sum(a["durasi_jp"] for a in allocs_ct)
+                if tot_jp > multi_subject_jp_threshold:
+                    t = teachers_map.get(tid)
+                    kelas_nama = next((c["nama_kelas"] for c in classes if c["id_kelas"] == cid), str(cid))
+                    if t and tot_jp > 0:
+                        shift = next((c["shift_operasional"] for c in classes if c["id_kelas"] == cid), "PAGI")
+                        avail_days = t["hari_tersedia_pagi"] if shift == "PAGI" else t["hari_tersedia_siang"]
+                        needed_days = len(allocs_ct)
+                        if len(avail_days) < needed_days:
+                            diff_days = needed_days - len(avail_days)
+                            mapel_names = ", ".join(a.get("nama_mapel", "") for a in allocs_ct)
+                            errors.append(
+                                f"⛔ Guru Mutlak [{t['nama_guru']}] di Kelas [{kelas_nama}] mengampu {len(allocs_ct)} mapel ({mapel_names}) "
+                                f"dengan total {tot_jp} JP (melebihi batas {multi_subject_jp_threshold} JP).\n"
+                                f"   • Aturan wajib memisahkan hari mengajar tiap mapel ke hari yang berbeda (butuh minimal {needed_days} hari).\n"
+                                f"   • Ketersediaan hari guru saat ini hanya {len(avail_days)} hari ({', '.join(avail_days) or 'Tidak Ada'}).\n"
+                                f"   💡 REKOMENDASI SOLUSI FORMASI:\n"
+                                f"     1. (Tambah Hari Guru) Tambahkan ketersediaan hari {t['nama_guru']} minimal {diff_days} hari lagi.\n"
+                                f"     2. (Ubah Guru Pengampu) Serahkan salah satu mapel ke guru lain di Tab 5."
+                            )
 
     # 5. Shift Capacity & Availability check for each Subject
     if subjects_map:
@@ -587,9 +655,10 @@ def _build_candidates(teachers, classes_map, allocations, ts_set, subjects_map, 
     return candidates
 
 
-def _run_solver(teachers, classes, allocations, ts_set, subjects_map, stage, time_limit=30.0):
+def _run_solver(teachers, classes, allocations, ts_set, subjects_map, stage, time_limit=30.0, max_jp_per_day=4, split_multi_subject=True, multi_subject_jp_threshold=4):
     """
     Menjalankan CP-SAT solver untuk stage tertentu.
+    max_jp_per_day: batas maksimal JP per guru per kelas per hari (dari settings).
     Return dict hasil atau None jika infeasible.
     """
     teachers_map = {t["id_guru"]: t for t in teachers}
@@ -796,6 +865,46 @@ def _run_solver(teachers, classes, allocations, ts_set, subjects_map, stage, tim
             if len(overlap_vars) > 1:
                 model.Add(sum(overlap_vars) <= 1)
 
+    # ── Constraint 6: Mapel Produktif — minimal 2 JP berurutan ───────
+    for a in allocations:
+        if not _is_produktif(a["nama_mapel"], a["kategori_mapel"]):
+            continue
+        if a["durasi_jp"] < 2:
+            continue
+
+        cid   = a["id_kelas"]
+        aid   = a["id_class_subject"]
+        shift = classes_map[cid]["shift_operasional"]
+
+        for day in DAYS_ORDER:
+            max_jp = SHIFT_LIMITS[shift].get(day, 0)
+            
+            A = {}
+            for jp in range(1, max_jp + 1):
+                slot_vars = by_alloc_slot.get((cid, day, jp, aid), [])
+                if slot_vars:
+                    act = model.NewBoolVar(f"prod_act_{cid}_{aid}_{day}_{jp}")
+                    model.Add(act == sum(slot_vars))
+                    A[jp] = act
+                else:
+                    A[jp] = 0
+            
+            # Wajib berurutan (Maksimal 1 blok kontigu per hari)
+            transitions = []
+            transitions.append(A[1])
+            for jp in range(2, max_jp + 1):
+                t = model.NewBoolVar(f"prod_trans_{cid}_{aid}_{day}_{jp}")
+                model.Add(t >= A[jp] - A[jp - 1])
+                transitions.append(t)
+            
+            model.Add(sum(transitions) <= 1)
+
+            # Total JP di hari ini tidak boleh sama dengan 1 (harus 0 atau >= 2)
+            active_vars = [A[jp] for jp in range(1, max_jp + 1) if not isinstance(A[jp], int)]
+            if active_vars:
+                S = sum(active_vars)
+                model.Add(S != 1)
+
     # ── Soft Constraint: Preferensi jam berurutan per alokasi (jika durasi_jp > 1)
     # Tujuan: Mendorong agar jam mengajar untuk mapel yang sama pada hari yang sama
     # ditempatkan secara berurutan (tanpa jeda/gap). Menggunakan sistem reward adjacent pairs.
@@ -825,6 +934,100 @@ def _run_solver(teachers, classes, allocations, ts_set, subjects_map, stage, tim
                     model.Add(sum(slot_vars_1) >= adj_var)
                     model.Add(sum(slot_vars_2) >= adj_var)
                     obj.append(reward_adjacent * adj_var)
+
+    # ── Soft Constraint: Aturan Khusus User (Informatika & Matematika) ───────
+    for a in allocations:
+        cid   = a["id_kelas"]
+        aid   = a["id_class_subject"]
+        shift = classes_map[cid]["shift_operasional"]
+        nama_mapel = (a["nama_mapel"] or "").upper()
+
+        # 1. Informatika (diusahakan minimal 2 JP berurutan dalam sehari, jangan 1 JP sendiri-sendiri)
+        if "INFORMATIKA" in nama_mapel:
+            for day in DAYS_ORDER:
+                max_jp = SHIFT_LIMITS[shift].get(day, 0)
+                day_slots = []
+                for jp in range(1, max_jp + 1):
+                    vars_at_slot = by_alloc_slot.get((cid, day, jp, aid), [])
+                    day_slots.extend(vars_at_slot)
+                
+                if day_slots:
+                    S = cp_model.LinearExpr.Sum(day_slots)
+                    
+                    s_is_0 = model.NewBoolVar(f"info_s0_{cid}_{aid}_{day}")
+                    s_is_1 = model.NewBoolVar(f"info_s1_{cid}_{aid}_{day}")
+                    s_is_ge_2 = model.NewBoolVar(f"info_s2_{cid}_{aid}_{day}")
+                    
+                    model.Add(s_is_0 + s_is_1 + s_is_ge_2 == 1)
+                    model.Add(S == 0).OnlyEnforceIf(s_is_0)
+                    model.Add(S == 1).OnlyEnforceIf(s_is_1)
+                    model.Add(S >= 2).OnlyEnforceIf(s_is_ge_2)
+                    
+                    # Penalti jika hanya terisi 1 JP dalam sehari
+                    obj.append(-150 * s_is_1)
+
+        # 2. Matematika (jangan sampai 4 JP berurutan dalam satu hari)
+        if "MATEMATIKA" in nama_mapel:
+            for day in DAYS_ORDER:
+                max_jp = SHIFT_LIMITS[shift].get(day, 0)
+                for jp in range(1, max_jp - 2):  # jp, jp+1, jp+2, jp+3
+                    v1 = by_alloc_slot.get((cid, day, jp, aid), [])
+                    v2 = by_alloc_slot.get((cid, day, jp + 1, aid), [])
+                    v3 = by_alloc_slot.get((cid, day, jp + 2, aid), [])
+                    v4 = by_alloc_slot.get((cid, day, jp + 3, aid), [])
+                    
+                    if v1 and v2 and v3 and v4:
+                        four_consec = model.NewBoolVar(f"math_4c_{cid}_{aid}_{day}_{jp}")
+                        model.Add(sum(v1) + sum(v2) + sum(v3) + sum(v4) <= 3 + four_consec)
+                        obj.append(-200 * four_consec)
+
+    # ── Constraint: Batas Jam Mengajar Per Guru Per Kelas Per Hari (Ideal <= 3 JP, Maks 4 JP) ────
+    by_class_teacher_day = {}
+    for key, var in x.items():
+        cid, day, jp, aid, tid = key
+        by_class_teacher_day.setdefault((cid, tid, day), []).append(var)
+
+    for (cid, tid, day), vars_list in by_class_teacher_day.items():
+        if vars_list:
+            # Hard constraint: Maksimal max_jp_per_day dalam 1 hari untuk kelas yang sama
+            model.Add(sum(vars_list) <= max_jp_per_day)
+
+            # Soft constraint: Penalti jika terpaksa >= (max_jp_per_day) JP (mengutamakan lebih sedikit)
+            is_maxjp = model.NewBoolVar(f"is_maxjp_c{cid}_t{tid}_{day}")
+            model.Add(sum(vars_list) == max_jp_per_day).OnlyEnforceIf(is_maxjp)
+            model.Add(sum(vars_list) != max_jp_per_day).OnlyEnforceIf(is_maxjp.Not())
+            obj.append(-400 * is_maxjp)
+
+    # ── Constraint: Pemisahan Hari untuk Guru Multi-Mapel di Kelas Sama ────────
+    if split_multi_subject:
+        class_teacher_allocs = {}
+        for a in allocations:
+            aid = a["id_class_subject"]
+            cid = a["id_kelas"]
+            cands = candidates.get(aid, [])
+            for tid in cands:
+                class_teacher_allocs.setdefault((cid, tid), []).append(a)
+
+        for (cid, tid), allocs_ct in class_teacher_allocs.items():
+            if len(allocs_ct) >= 2:
+                tot_jp = sum(a["durasi_jp"] for a in allocs_ct)
+                if tot_jp > multi_subject_jp_threshold:
+                    for day in DAYS_ORDER:
+                        aid_active_vars = []
+                        for a in allocs_ct:
+                            aid = a["id_class_subject"]
+                            jp_vars = [
+                                var for key, var in x.items()
+                                if key[0] == cid and key[1] == day and key[3] == aid and key[4] == tid
+                            ]
+                            if jp_vars:
+                                is_active = model.NewBoolVar(f"multi_split_c{cid}_t{tid}_a{aid}_{day}")
+                                model.Add(sum(jp_vars) >= 1).OnlyEnforceIf(is_active)
+                                model.Add(sum(jp_vars) == 0).OnlyEnforceIf(is_active.Not())
+                                aid_active_vars.append(is_active)
+
+                        if len(aid_active_vars) > 1:
+                            model.Add(sum(aid_active_vars) <= 1)
 
     # ── Soft Constraint: Pemerataan beban guru (DILIGHTEN SEVERELY) ─────────
     # Hanya catat beban, tanpa logic perbandingan yang berat
@@ -951,6 +1154,39 @@ def _run_solver(teachers, classes, allocations, ts_set, subjects_map, stage, tim
                 f"mengajar {load} JP, melebihi maksimal {max_jp_val} JP."
             )
 
+    # Deteksi guru yang mengajar 4 JP atau lebih di kelas yang sama pada hari yang sama
+    heavy_load_details = []
+    daily_class_loads = {}
+    for r in results:
+        aid = r["id_class_subject"]
+        a_info = allocations_map.get(aid)
+        if not a_info:
+            continue
+        cid = a_info["id_kelas"]
+        tid = r["id_guru"]
+        day = r["hari"]
+        key = (tid, cid, day)
+        daily_class_loads[key] = daily_class_loads.get(key, 0) + 1
+
+    for (tid, cid, day), total_jp in daily_class_loads.items():
+        if total_jp >= 4:
+            t_info = teachers_map[tid]
+            c_info = classes_map[cid]
+            detail_item = {
+                "id_guru": tid,
+                "kode_guru": t_info["kode_guru"],
+                "nama_guru": t_info["nama_guru"],
+                "id_kelas": cid,
+                "nama_kelas": c_info["nama_kelas"],
+                "hari": day,
+                "total_jp": total_jp
+            }
+            heavy_load_details.append(detail_item)
+            warn_logs.append(
+                f"[Beban Tinggi per Kelas ≥4 JP] Guru {t_info['nama_guru']} (kode {t_info['kode_guru']}) "
+                f"mengajar {total_jp} JP di Kelas {c_info['nama_kelas']} pada hari {day}."
+            )
+
     total_possible = sum(
         SHIFT_LIMITS[c["shift_operasional"]][day]
         for c in classes
@@ -961,11 +1197,12 @@ def _run_solver(teachers, classes, allocations, ts_set, subjects_map, stage, tim
     _save_timetable(results)
 
     return {
-        "status":          "SUCCESS",
-        "fill_percentage": fill_pct,
-        "fallback_count":  fallback_cnt,
-        "warnings":        warn_logs,
-        "errors":          [],
+        "status":             "SUCCESS",
+        "fill_percentage":    fill_pct,
+        "fallback_count":     fallback_cnt,
+        "warnings":           warn_logs,
+        "heavy_load_details": heavy_load_details,
+        "errors":             [],
     }
 
 
@@ -1034,11 +1271,45 @@ def _diagnose_infeasibility(teachers, classes, allocations, ts_set, subjects_map
             max_slots += day_slots
         
         if locked_jp > max_slots:
+            excess_slots = locked_jp - max_slots
             errors.append(
-                f"Guru Mutlak [{t['nama_guru']}] dikunci untuk total {locked_jp} JP pada shift {shift}, "
-                f"tetapi hari ketersediaannya ({', '.join(avail_days)}) hanya menampung maksimal {max_slots} JP."
+                f"⛔ Guru Mutlak [{t['nama_guru']}] dikunci untuk total {locked_jp} JP pada shift {shift}, "
+                f"tetapi hari ketersediaannya ({', '.join(avail_days) or 'Tidak Ada'}) hanya menampung maksimal {max_slots} JP.\n"
+                f"   💡 REKOMENDASI SOLUSI FORMASI:\n"
+                f"     1. (Tambah Hari Guru) Tambahkan ketersediaan hari mengajar {t['nama_guru']} di Tab Ketersediaan Hari.\n"
+                f"     2. (Kurangi Jam Alokasi) Kurangi alokasi jam mengajar {t['nama_guru']} sebanyak {excess_slots} JP.\n"
+                f"     3. (Lepas Guru Mutlak) Un-lock status Guru Mutlak {t['nama_guru']} agar bisa diampu guru kualifikasi lain."
             )
-            
+
+    # Check 1b: Batas Maksimal 4 JP/Hari Per Guru Per Kelas Check (Hard Constraint)
+    class_teacher_locked_diag = {}
+    for a in allocations:
+        id_fixed = a.get("id_guru_mutlak")
+        if id_fixed:
+            class_teacher_locked_diag.setdefault((a["id_kelas"], id_fixed), []).append(a)
+
+    for (cid, tid), allocs_ct in class_teacher_locked_diag.items():
+        tot_jp = sum(a["durasi_jp"] for a in allocs_ct)
+        t = teachers_map.get(tid)
+        kelas_nama = next((c["nama_kelas"] for c in classes if c["id_kelas"] == cid), str(cid))
+        if t and tot_jp > 0:
+            shift = next((c["shift_operasional"] for c in classes if c["id_kelas"] == cid), "PAGI")
+            avail_days = t["hari_tersedia_pagi"] if shift == "PAGI" else t["hari_tersedia_siang"]
+            max_in_class = len(avail_days) * 4
+            if tot_jp > max_in_class:
+                min_days = math.ceil(tot_jp / 4)
+                needed_days = min_days - len(avail_days)
+                excess_jp = tot_jp - max_in_class
+                errors.append(
+                    f"⛔ Guru Mutlak [{t['nama_guru']}] di Kelas [{kelas_nama}] mengampu total {tot_jp} JP, "
+                    f"tetapi hanya memiliki {len(avail_days)} hari ketersediaan ({', '.join(avail_days) or 'Tidak Ada'}).\n"
+                    f"   • Batas maksimal darurat mengajar di 1 kelas adalah 4 JP/hari (Hard Constraint).\n"
+                    f"   💡 REKOMENDASI SOLUSI FORMASI:\n"
+                    f"     1. (Tambah Hari Guru) Tambahkan ketersediaan hari {t['nama_guru']} minimal {needed_days} hari lagi (butuh minimal {min_days} hari).\n"
+                    f"     2. (Kurangi Jam Alokasi) Kurangi beban alokasi jam mengajar {t['nama_guru']} di Kelas [{kelas_nama}] sebanyak {excess_jp} JP.\n"
+                    f"     3. (Ubah Guru Pengampu) Lepas status Guru Mutlak atau bagikan sebagian jam ke guru lain yang memiliki kualifikasi di Tab 5."
+                )
+
     # 2. Shift Capacity & Availability check for each Subject
     # Group allocations by subject & shift
     subj_shift_allocs = {}
@@ -1152,6 +1423,20 @@ def generate_timetable():
     abort_requested = False
     active_stage = 0
 
+    # Baca setting batas JP dari system_settings
+    from backend.database import get_setting as _get_setting
+    try:
+        max_jp_ideal   = int(_get_setting("max_jp_ideal",   "3"))
+        max_jp_darurat = int(_get_setting("max_jp_darurat", "4"))
+        split_multi    = _get_setting("split_multi_subject_teacher_days", "true").lower() == "true"
+        multi_threshold= int(_get_setting("multi_subject_jp_threshold", "4"))
+    except (ValueError, TypeError):
+        max_jp_ideal, max_jp_darurat, split_multi, multi_threshold = 3, 4, True, 4
+    # Pastikan ideal <= darurat
+    max_jp_ideal   = min(max_jp_ideal,   max_jp_darurat)
+    max_jp_darurat = max(max_jp_ideal,   max_jp_darurat)
+    logger.info(f"Batas JP: ideal={max_jp_ideal} JP, darurat={max_jp_darurat} JP, split_multi={split_multi}, threshold={multi_threshold} JP")
+
     teachers, classes, subjects_map, allocations, ts_set = _fetch_master_data()
 
     if not classes:
@@ -1166,55 +1451,71 @@ def generate_timetable():
     logger.info(f"Kualifikasi guru-mapel: {len(ts_set)} relasi dari teacher_subjects.")
 
     # Pre-flight
-    errors, warnings = _preflight(teachers, classes, allocations, ts_set, subjects_map)
+    errors, warnings = _preflight(teachers, classes, allocations, ts_set, subjects_map,
+                                   max_jp_darurat=max_jp_darurat,
+                                   split_multi_subject=split_multi,
+                                   multi_subject_jp_threshold=multi_threshold)
     if errors:
         return {"status": "FAILED", "errors": errors, "warnings": warnings}
 
-    # Stage 1 — kualifikasi penuh (hanya guru yang terdaftar di teacher_subjects untuk mapel ini)
-    logger.info("Stage 1: Solving dengan kualifikasi penuh...")
+    # ── PASS 1: Batas Ideal (Hard Max = max_jp_ideal) ────────────────────────
+    logger.info(f"Pass 1: Solving dengan batas ideal {max_jp_ideal} JP/hari (TIDAK ADA SUBSTITUSI)...")
     active_stage = 1
     res = _run_solver(teachers, classes, allocations, ts_set, subjects_map,
-                      stage=STAGE_FULL_QUAL, time_limit=90.0)
+                      stage=STAGE_FULL_QUAL, time_limit=25.0, max_jp_per_day=max_jp_ideal,
+                      split_multi_subject=split_multi, multi_subject_jp_threshold=multi_threshold)
     if res:
         active_stage = 0
         res["warnings"] = warnings + res["warnings"]
         res["stage"]    = 1
-        logger.info("Stage 1 berhasil.")
+        res["used_darurat"] = False
+        res["max_jp_ideal"]   = max_jp_ideal
+        res["max_jp_darurat"] = max_jp_darurat
+        logger.info(f"Pass 1 berhasil dengan batas ideal {max_jp_ideal} JP.")
         return res
 
     if abort_requested:
         active_stage = 0
         return {"status": "FAILED", "errors": ["Generate dibatalkan oleh pengguna."], "warnings": []}
 
-    # Stage 2 — kualifikasi kategori mapel sama
-    logger.info("Stage 1 gagal. Stage 2: Fallback kualifikasi kategori...")
-    active_stage = 2
-    res = _run_solver(teachers, classes, allocations, ts_set, subjects_map,
-                      stage=STAGE_CAT_QUAL, time_limit=90.0)
-    if res:
-        active_stage = 0
-        res["warnings"] = warnings + res["warnings"]
-        res["stage"]    = 2
-        logger.info("Stage 2 berhasil.")
-        return res
+    # ── PASS 2: Batas Darurat (Hard Max = max_jp_darurat) ────────────────────
+    if max_jp_darurat > max_jp_ideal:
+        logger.info(f"Pass 1 gagal. Mencoba Pass 2 dengan batas darurat {max_jp_darurat} JP/hari...")
+        active_stage = 1
+        res = _run_solver(teachers, classes, allocations, ts_set, subjects_map,
+                          stage=STAGE_FULL_QUAL, time_limit=90.0, max_jp_per_day=max_jp_darurat,
+                          split_multi_subject=split_multi, multi_subject_jp_threshold=multi_threshold)
+        if res:
+            active_stage = 0
+            res["warnings"] = warnings + res["warnings"] + [
+                f"Jadwal menggunakan batas DARURAT ({max_jp_darurat} JP/hari) karena "
+                f"batas ideal ({max_jp_ideal} JP/hari) tidak dapat dipenuhi untuk semua kelas."
+            ]
+            res["stage"]    = 1
+            res["used_darurat"] = True
+            res["max_jp_ideal"]   = max_jp_ideal
+            res["max_jp_darurat"] = max_jp_darurat
+            logger.info(f"Pass 2 berhasil dengan batas darurat {max_jp_darurat} JP.")
+            return res
 
-    if abort_requested:
-        active_stage = 0
-        return {"status": "FAILED", "errors": ["Generate dibatalkan oleh pengguna."], "warnings": []}
+        if abort_requested:
+            active_stage = 0
+            return {"status": "FAILED", "errors": ["Generate dibatalkan oleh pengguna."], "warnings": []}
 
-    # Skip Stage 3 karena ukuran model yang terlampau besar tanpa kualifikasi 
-    # menyebabkan crash Access Violation (0xC0000005) pada platform Windows.
-    # Sistem langsung mengalihkan ke diagnosa ketidaklayakan data (infeasibility diagnostics).
-    logger.info("Stage 2 gagal. Melewati Stage 3 untuk menghindari crash memory. Menjalankan diagnosa...")
+    # Substitusi Guru Dilarang (Strict Qualification Mode)
+    # Jika kualifikasi penuh tidak menemukan solusi, langsung nyatakan Infeasible.
+    logger.info("Semua Pass gagal. Substitusi guru dilarang, menjalankan diagnosa infeasibility...")
+    active_stage = 0
 
     diagnostics = _diagnose_infeasibility(teachers, classes, allocations, ts_set, subjects_map)
     return {
         "status":  "FAILED",
         "stage":   None,
         "errors":  [
-            "Solver tidak dapat menemukan solusi yang layak (Infeasible) "
-            "setelah 2 tahap pencarian. Periksa pesan kesalahan diagnosa di bawah "
-            "untuk memperbaiki data master Anda."
+            f"Solver tidak dapat menemukan solusi yang layak tanpa substitusi guru (Infeasible), "
+            f"bahkan dengan batas darurat {max_jp_darurat} JP/hari. "
+            "Semua jadwal wajib diampu oleh guru berkualifikasi asli. "
+            "Periksa detail kesalahan diagnosa di bawah untuk menyesuaikan data master Anda."
         ] + diagnostics,
         "warnings": warnings,
     }

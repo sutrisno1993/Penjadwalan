@@ -33,6 +33,11 @@ class Teacher(TeacherBase):
     class Config:
         from_attributes = True
 
+class TeacherAvailabilityBatchItem(BaseModel):
+    id_guru: int
+    hari_tersedia_pagi: List[str]
+    hari_tersedia_siang: List[str]
+
 
 # ─────────────────────────────────────────────
 # Classes
@@ -134,3 +139,30 @@ class SettingsUpdate(BaseModel):
     credentials_json: str
     lms_api_url:      Optional[str] = None
     lms_api_key:      Optional[str] = None
+
+
+# ─────────────────────────────────────────────
+# Time Slots (Pengaturan Jam Waktu)
+# ─────────────────────────────────────────────
+
+class TimeSlotItem(BaseModel):
+    id_slot:     Optional[int] = None
+    hari:        str
+    shift:       str = "PAGI"
+    jam_ke:      Optional[int] = None
+    tipe_slot:   str = "KBM"
+    jam_mulai:   str
+    jam_selesai: str
+    keterangan:  Optional[str] = None
+    urutan:      Optional[int] = 0
+
+class TimeSlotBulkSave(BaseModel):
+    hari:  str
+    shift: str = "PAGI"
+    slots: List[TimeSlotItem]
+
+class TimeSlotCopy(BaseModel):
+    hari_asal:   str
+    hari_tujuan: List[str]
+    shift:       str = "PAGI"
+

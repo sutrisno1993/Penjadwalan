@@ -152,10 +152,29 @@
     .btn-royal:hover { filter: brightness(1.15); }
 
     /* Table */
-    .tbl-wrap { overflow-x: auto; }
-    table { width: 100%; border-collapse: collapse; font-size: .83rem; }
+    .tbl-wrap {
+      overflow-x: auto;
+      overflow-y: auto;
+      max-height: calc(100vh - 230px);
+      border-radius: 8px;
+      border: 1px solid var(--border);
+    }
+    table { width: 100%; border-collapse: separate; border-spacing: 0; font-size: .83rem; }
     th, td { padding: 9px 11px; text-align: left; border-bottom: 1px solid var(--border); }
-    th { color: var(--muted); font-size: .75rem; text-transform: uppercase; letter-spacing: .04em; font-weight: 600; }
+    th {
+      color: var(--muted);
+      font-size: .75rem;
+      text-transform: uppercase;
+      letter-spacing: .04em;
+      font-weight: 600;
+      position: sticky;
+      top: 0;
+      z-index: 12;
+      background: var(--surface2);
+      border-bottom: 2px solid var(--border);
+      box-shadow: 0 2px 5px rgba(0,0,0,0.3);
+    }
+    td { background: var(--surface); }
     tr:hover td { background: var(--surface2); }
     .btn-edit { background: transparent; border: 1px solid var(--border); color: var(--primary-h); margin-right: 4px; }
     .btn-edit:hover { background: rgba(99,102,241,.15); border-color: var(--primary); }
@@ -167,6 +186,19 @@
     .b-umum { background: rgba(148,163,184,.15); color: var(--muted); }
     .b-olahraga { background: rgba(34,197,94,.15); color: var(--success); }
     .b-produktif { background: rgba(245,158,11,.15); color: var(--warn); }
+    .b-jam-terbatas {
+      background: linear-gradient(135deg, #f59e0b, #e11d48);
+      color: #ffffff;
+      font-weight: 700;
+      padding: 3px 9px;
+      font-size: 0.71rem;
+      border-radius: 99px;
+      box-shadow: 0 2px 6px rgba(245, 158, 11, 0.4);
+      letter-spacing: 0.02em;
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+    }
 
     /* JP progress bar */
     .jp-bar-wrap { display: flex; align-items: center; gap: 8px; }
@@ -721,11 +753,14 @@
     <button class="nav-item on" data-page="pg-dashboard"><i class="fa-solid fa-gauge-high"></i> <span class="nav-text">Dashboard</span></button>
     <button class="nav-item" data-page="pg-timetable"><i class="fa-solid fa-table-cells-large"></i> <span class="nav-text">Grid Jadwal</span></button>
     <button class="nav-item" data-page="pg-master"><i class="fa-solid fa-database"></i> <span class="nav-text">Data Master</span></button>
+    <button class="nav-item" data-page="pg-time-slots"><i class="fa-solid fa-clock"></i> <span class="nav-text">Pengaturan Jam (Waktu)</span></button>
     <button class="nav-item" data-page="pg-settings"><i class="fa-solid fa-sliders"></i> <span class="nav-text">Pengaturan</span></button>
     <button class="nav-item" data-page="pg-report"><i class="fa-solid fa-chalkboard-user"></i> <span class="nav-text">Laporan Guru</span></button>
     <button class="nav-item" data-page="pg-alloc"><i class="fa-solid fa-list-check"></i> <span class="nav-text">Ringkasan Alokasi</span></button>
     <button class="nav-item" data-page="pg-feasibility"><i class="fa-solid fa-triangle-exclamation"></i> <span class="nav-text">Peta Kelayakan</span></button>
+    <button class="nav-item" data-page="pg-ketersediaan-hari"><i class="fa-solid fa-calendar-check"></i> <span class="nav-text">Ketersediaan Hari</span></button>
     <button class="nav-item" data-page="pg-guru-mutlak"><i class="fa-solid fa-lock"></i> <span class="nav-text">Daftar Guru Mutlak</span></button>
+    <button class="nav-item" data-page="pg-guru-4jp"><i class="fa-solid fa-clock-rotate-left"></i> <span class="nav-text">Guru ≥4 JP per Kelas</span></button>
 
     <div class="sidebar-foot">
       <button class="nav-item" id="btn-fullscreen">
@@ -742,9 +777,9 @@
       <div>
         <div style="display: flex; align-items: center; gap: 12px; flex-wrap: wrap;">
           <h2 id="page-title">Dashboard</h2>
-          <button id="btn-branch-switch" class="btn btn-sm" style="border-radius: 20px; font-weight: 600; padding: 4px 12px; background: rgba(99,102,241,0.15); color: var(--primary-h); border: 1px solid var(--primary); cursor: pointer; display: flex; align-items: center; gap: 6px; transition: .15s;">
-            <i class="fa-solid fa-school"></i> Cabang: <span id="active-branch-label">Bekasi</span> <i class="fa-solid fa-arrow-right-arrow-left" style="font-size: 0.75rem;"></i>
-          </button>
+          <span id="active-db-badge" style="border-radius: 20px; font-weight: 600; padding: 4px 12px; background: rgba(99,102,241,0.15); color: var(--primary-h); border: 1px solid var(--primary); display: inline-flex; align-items: center; gap: 6px; font-size: 0.8rem; cursor: default;">
+            <i class="fa-solid fa-database"></i> Database: <span id="active-db-label">Bekasi</span>
+          </span>
         </div>
         <p id="page-desc">Ringkasan sistem jadwal Anda.</p>
       </div>
@@ -852,7 +887,7 @@
             </div>
             <div class="tbl-wrap">
               <table id="tbl-guru">
-                <thead><tr><th></th><th>Kode</th><th>Nama</th><th>No. WA</th><th>Shift</th><th>Mapel Diajarkan</th><th></th></tr></thead>
+                <thead><tr><th></th><th id="th-guru-kode" style="cursor: pointer; user-select: none;">Kode <i class="fa-solid fa-sort" id="icon-sort-kode" style="font-size:0.8rem; margin-left: 4px; opacity: 0.5;"></i></th><th id="th-guru-nama" style="cursor: pointer; user-select: none;">Nama <i class="fa-solid fa-sort-up" id="icon-sort-nama" style="font-size:0.8rem; margin-left: 4px; opacity: 0.8;"></i></th><th>No. WA</th><th>Shift</th><th>Mapel Diajarkan</th><th></th></tr></thead>
                 <tbody></tbody>
               </table>
               <p id="tbl-guru-empty" class="text-muted" style="text-align:center;padding:20px;display:none">Belum ada guru.</p>
@@ -938,42 +973,204 @@
 
       </div><!-- /pg-master -->
 
+      <!-- Pengaturan Waktu Jam Pelajaran (Time Slots) -->
+      <div class="page" id="pg-time-slots">
+        <div class="panel" style="max-width:980px">
+          <div style="display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:12px; margin-bottom:16px;">
+            <div>
+              <h3 style="margin:0; display:flex; align-items:center; gap:8px;">
+                <i class="fa-solid fa-clock" style="color:var(--primary-h);"></i>
+                Form Pengaturan Alokasi Waktu & Jam Pelajaran (JP)
+              </h3>
+              <p style="margin:4px 0 0; font-size:.82rem; color:var(--muted)">
+                Konfigurasi jadwal waktu untuk Jam Pelajaran (KBM), Upacara Bendera, dan Istirahat per hari dan shift.
+              </p>
+            </div>
+            <div style="display:flex; gap:8px;">
+              <button class="btn btn-sm btn-ghost" id="btn-reset-time-slots" onclick="resetTimeSlotsHandler()"><i class="fa-solid fa-arrow-rotate-left"></i> Reset Default</button>
+              <button class="btn btn-sm btn-primary" id="btn-save-time-slots" onclick="saveTimeSlotsHandler()"><i class="fa-solid fa-floppy-disk"></i> Simpan Waktu Jam</button>
+            </div>
+          </div>
+
+          <!-- Shift & Day Selection -->
+          <div style="display:flex; gap:14px; flex-wrap:wrap; align-items:center; margin-bottom:16px; background:var(--surface2); padding:10px 14px; border-radius:12px; border:1px solid var(--border);">
+            <div style="display:flex; align-items:center; gap:8px;">
+              <span style="font-weight:600; font-size:.85rem;"><i class="fa-solid fa-sun" style="color:var(--warn)"></i> Shift:</span>
+              <div style="display:flex; gap:4px; background:var(--surface); padding:2px; border-radius:8px; border:1px solid var(--border);">
+                <button class="sub-btn on" id="btn-ts-shift-pagi" style="border:none; margin:0;" onclick="loadTimeSlots('PAGI', currentTsDay)"><i class="fa-solid fa-sun" style="color:var(--warn)"></i> Shift Pagi</button>
+                <button class="sub-btn" id="btn-ts-shift-siang" style="border:none; margin:0;" onclick="loadTimeSlots('SIANG', currentTsDay)"><i class="fa-solid fa-moon" style="color:var(--info)"></i> Shift Siang</button>
+              </div>
+            </div>
+
+            <div style="display:flex; align-items:center; gap:8px;">
+              <span style="font-weight:600; font-size:.85rem;"><i class="fa-solid fa-calendar-day" style="color:var(--primary-h)"></i> Hari:</span>
+              <div id="ts-day-tabs" style="display:flex; gap:4px; flex-wrap:wrap;">
+                <button class="btn btn-sm btn-primary ts-day-tab on" data-day="SENIN" onclick="loadTimeSlots(currentTsShift, 'SENIN')">Senin</button>
+                <button class="btn btn-sm btn-ghost ts-day-tab" data-day="SELASA" onclick="loadTimeSlots(currentTsShift, 'SELASA')">Selasa</button>
+                <button class="btn btn-sm btn-ghost ts-day-tab" data-day="RABU" onclick="loadTimeSlots(currentTsShift, 'RABU')">Rabu</button>
+                <button class="btn btn-sm btn-ghost ts-day-tab" data-day="KAMIS" onclick="loadTimeSlots(currentTsShift, 'KAMIS')">Kamis</button>
+                <button class="btn btn-sm btn-ghost ts-day-tab" data-day="JUMAT" onclick="loadTimeSlots(currentTsShift, 'JUMAT')">Jumat</button>
+                <button class="btn btn-sm btn-ghost ts-day-tab" data-day="SABTU" onclick="loadTimeSlots(currentTsShift, 'SABTU')">Sabtu</button>
+              </div>
+            </div>
+          </div>
+
+          <!-- Highlight / Info Box for Active Day & Shift -->
+          <div id="ts-info-badge" style="background:rgba(99,102,241,0.08); border:1px solid rgba(99,102,241,0.25); border-radius:10px; padding:10px 14px; margin-bottom:14px; font-size:.84rem; display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:8px;">
+            <div>
+              <strong id="ts-info-title">Hari SENIN (Shift PAGI)</strong>
+              <span style="color:var(--muted); margin-left:8px;" id="ts-info-desc">Konfigurasi jam alokasi waktu untuk hari SENIN.</span>
+            </div>
+            <div style="display:flex; gap:6px;">
+              <button class="btn btn-sm btn-info" id="btn-copy-ts-days" style="font-size:0.75rem;" onclick="openCopyTsModal()"><i class="fa-solid fa-copy"></i> Salin ke Hari Lain</button>
+              <button class="btn btn-sm btn-secondary" id="btn-add-ts-row" style="font-size:0.75rem;" onclick="addTsRow()"><i class="fa-solid fa-plus"></i> Tambah Slot Jam</button>
+            </div>
+          </div>
+
+          <!-- Time Slots Form Table -->
+          <div class="tbl-wrap" style="margin-bottom:16px;">
+            <table style="width:100%; border-collapse:collapse;" id="tbl-time-slots">
+              <thead>
+                <tr style="border-bottom:1px solid var(--border); color:var(--muted); font-size:.78rem; text-transform:uppercase; text-align:center;">
+                  <th style="padding:10px; width:45px;">No</th>
+                  <th style="padding:10px; text-align:left;">Tipe Slot</th>
+                  <th style="padding:10px; width:90px;">Jam Ke-</th>
+                  <th style="padding:10px; width:110px;">Jam Mulai</th>
+                  <th style="padding:10px; width:110px;">Jam Selesai</th>
+                  <th style="padding:10px; text-align:left;">Format Waktu Tampilan</th>
+                  <th style="padding:10px; width:80px;">Aksi</th>
+                </tr>
+              </thead>
+              <tbody id="tbody-time-slots">
+                <!-- Dynamic rows populated by JS -->
+              </tbody>
+            </table>
+          </div>
+
+          <div style="display:flex; justify-content:space-between; align-items:center;">
+            <span style="font-size:.78rem; color:var(--muted);"><i class="fa-solid fa-circle-info"></i> Format waktu otomatis memperbarui rentang waktu di laporan & tabel ekspor Excel.</span>
+            <button class="btn btn-primary" id="btn-save-time-slots-bottom" onclick="saveTimeSlotsHandler()"><i class="fa-solid fa-floppy-disk"></i> Simpan Waktu Jam Pelajaran</button>
+          </div>
+        </div>
+      </div><!-- /pg-time-slots -->
+
       <!-- Pengaturan -->
       <div class="page" id="pg-settings">
         <div class="panel" style="max-width:680px">
-          <h3 style="margin-bottom:16px"><i class="fa-brands fa-google-drive"></i> Konfigurasi Google Sheets API</h3>
-          <form class="form" id="form-settings">
-            <div class="field">
-              <label>Spreadsheet ID</label>
-              <input id="cfg-sid" type="text" placeholder="ID dari URL Google Sheets">
-              <span class="hint">URL: https://docs.google.com/spreadsheets/d/<strong>[ID INI]</strong>/edit</span>
+
+          <!-- ══ Aturan Batas Jam Mengajar ══ -->
+          <div id="jp-limits-section">
+            <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px">
+              <i class="fa-solid fa-gauge-simple-high" style="font-size:1.1rem;color:var(--primary)"></i>
+              <h3 style="margin:0">Aturan Batas Jam Mengajar</h3>
             </div>
-            <div class="field">
-              <label>Service Account Credentials (JSON)</label>
-              <textarea id="cfg-creds" rows="9" placeholder="Paste isi file JSON Service Account di sini"></textarea>
-              <span class="hint">Share spreadsheet ke email Service Account sebagai Editor.</span>
+            <p style="font-size:.82rem;color:var(--muted);margin-bottom:14px">
+              Atur batas maksimal JP (Jam Pelajaran) yang boleh diampu satu guru di satu kelas dalam sehari.<br>
+              Solver akan usahakan <strong>Batas Ideal</strong> dulu. Jika tidak memungkinkan, otomatis naik ke <strong>Batas Darurat</strong>.
+            </p>
+
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:16px">
+              <!-- Batas Ideal -->
+              <div style="background:rgba(99,102,241,.08);border:1px solid rgba(99,102,241,.3);border-radius:12px;padding:16px">
+                <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px">
+                  <span style="background:var(--primary);color:#fff;border-radius:6px;padding:3px 9px;font-size:.78rem;font-weight:600">IDEAL</span>
+                  <span style="font-size:.85rem;font-weight:600">Batas Normal</span>
+                </div>
+                <div style="display:flex;align-items:center;gap:10px">
+                  <input type="number" id="input-jp-ideal" min="1" max="7" value="3"
+                    style="width:70px;padding:8px 10px;border-radius:8px;border:1px solid var(--border);background:var(--surface2);color:var(--text);font-size:1.2rem;font-weight:700;text-align:center">
+                  <span style="color:var(--muted);font-size:.82rem">JP/hari</span>
+                </div>
+                <p style="margin-top:8px;font-size:.75rem;color:var(--muted)">Target solver: usahakan max X JP dulu</p>
+              </div>
+
+              <!-- Batas Darurat -->
+              <div style="background:rgba(239,68,68,.07);border:1px solid rgba(239,68,68,.3);border-radius:12px;padding:16px">
+                <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px">
+                  <span style="background:var(--danger);color:#fff;border-radius:6px;padding:3px 9px;font-size:.78rem;font-weight:600">DARURAT</span>
+                  <span style="font-size:.85rem;font-weight:600">Batas Absolut</span>
+                </div>
+                <div style="display:flex;align-items:center;gap:10px">
+                  <input type="number" id="input-jp-darurat" min="1" max="7" value="4"
+                    style="width:70px;padding:8px 10px;border-radius:8px;border:1px solid var(--border);background:var(--surface2);color:var(--text);font-size:1.2rem;font-weight:700;text-align:center">
+                  <span style="color:var(--muted);font-size:.82rem">JP/hari</span>
+                </div>
+                <p style="margin-top:8px;font-size:.75rem;color:var(--muted)">Hanya dipakai jika batas ideal tidak memungkinkan</p>
+              </div>
             </div>
-            <div class="btn-row">
-              <button type="submit" class="btn btn-primary"><i class="fa-solid fa-floppy-disk"></i> Simpan</button>
-              <a href="/api/template" class="btn btn-ghost"><i class="fa-solid fa-file-excel"></i> Download Template Excel</a>
+
+            <!-- Pemisahan Hari Guru Multi-Mapel -->
+            <div style="background:rgba(56,189,248,.07);border:1px solid rgba(56,189,248,.3);border-radius:12px;padding:16px;margin-bottom:16px">
+              <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
+                <div style="display:flex;align-items:center;gap:8px">
+                  <i class="fa-solid fa-calendar-day" style="color:var(--info);font-size:1.1rem"></i>
+                  <span style="font-size:.9rem;font-weight:600">Pemisahan Hari Guru Multi-Mapel di Kelas Sama</span>
+                </div>
+                <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:.85rem;font-weight:600;color:var(--text)">
+                  <input type="checkbox" id="chk-split-multi-subject" checked style="width:18px;height:18px;cursor:pointer;accent-color:var(--primary)">
+                  <span>Aktifkan</span>
+                </label>
+              </div>
+              <p style="font-size:.78rem;color:var(--muted);margin-bottom:12px">
+                Jika seorang guru mengampu 2 atau lebih mata pelajaran di kelas yang sama dan total jam pelajaran gabungannya melebihi threshold, maka harinya <strong>wajib dibedakan (tidak boleh di hari yang sama)</strong> agar tidak ada kekosongan jam berturut-turut jika guru izin.
+              </p>
+              <div style="display:flex;align-items:center;gap:10px">
+                <span style="font-size:.82rem;color:var(--text);font-weight:500">Batas Threshold Jam Gabungan:</span>
+                <input type="number" id="input-multi-subject-threshold" min="1" max="10" value="4"
+                  style="width:70px;padding:6px 10px;border-radius:8px;border:1px solid var(--border);background:var(--surface2);color:var(--text);font-size:1rem;font-weight:700;text-align:center">
+                <span style="color:var(--muted);font-size:.82rem">JP (Contoh: > 4 JP wajib dipisah)</span>
+              </div>
             </div>
-          </form>
+
+            <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+              <button id="btn-save-jp-limits" class="btn btn-primary">
+                <i class="fa-solid fa-floppy-disk"></i> Simpan Pengaturan
+              </button>
+              <span id="jp-limits-status" style="font-size:.82rem;color:var(--muted)"></span>
+            </div>
+          </div>
+
           <hr class="sep"/>
-          <h3 style="margin-bottom:16px"><i class="fa-solid fa-cloud-arrow-up"></i> Integrasi LMS (Laravel)</h3>
-          <div class="form" style="margin-bottom: 24px;">
-            <div class="field">
-              <label>LMS API URL Endpoint</label>
-              <input id="cfg-lms-url" type="text" placeholder="Contoh: http://localhost:8000/api/v1/sync-all">
-              <span class="hint">Endpoint API pada aplikasi Laravel LMS yang akan menerima lemparan data dari SITAB.</span>
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;flex-wrap:wrap;gap:8px">
+            <div>
+              <h3 style="margin:0"><i class="fa-solid fa-file-excel"></i> Template Excel</h3>
+              <p style="margin:4px 0 0;font-size:.8rem;color:var(--muted)">Download template format Excel untuk mengisi data master secara offline.</p>
             </div>
-            <div class="field">
-              <label>LMS Bearer Token (API Key)</label>
-              <input id="cfg-lms-key" type="password" placeholder="Masukkan token rahasia integrasi">
-              <span class="hint">Token otentikasi Bearer untuk mengamankan jalur API komunikasi.</span>
+            <a href="/api/template" class="btn btn-ghost"><i class="fa-solid fa-file-excel"></i> Download Template Excel</a>
+          </div>
+          <hr class="sep"/>
+
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;flex-wrap:wrap;gap:8px">
+            <div>
+              <h3 style="margin:0"><i class="fa-solid fa-cloud-arrow-up"></i> Integrasi LMS (Laravel)</h3>
+              <p style="margin:4px 0 0;font-size:.8rem;color:var(--muted)">Kelola daftar endpoint LMS. Pilih satu sebagai aktif, lalu kirim data.</p>
             </div>
-            <div class="btn-row">
-              <button class="btn btn-success" id="btn-sync-lms"><i class="fa-solid fa-rotate"></i> Kirim Semua Data ke LMS</button>
-            </div>
+            <button id="btn-add-lms-endpoint" class="btn btn-primary btn-sm"><i class="fa-solid fa-plus"></i> Tambah Endpoint</button>
+          </div>
+          <!-- Info endpoint aktif -->
+          <div style="padding:10px 14px;border-radius:10px;background:rgba(255,255,255,.04);border:1px solid var(--border);margin-bottom:14px;font-size:.82rem" id="lms-active-label">
+            <i class="fa-solid fa-circle-exclamation" style="color:var(--warn)"></i> <span style="color:var(--muted)">Memuat...</span>
+          </div>
+          <!-- Tabel daftar endpoint -->
+          <div class="tbl-wrap" style="margin-bottom:14px">
+            <table style="width:100%;border-collapse:collapse;font-size:.82rem">
+              <thead>
+                <tr style="border-bottom:1px solid var(--border);color:var(--muted);font-size:.72rem;text-transform:uppercase">
+                  <th style="padding:8px 14px;text-align:left">Nama / Label</th>
+                  <th style="padding:8px 14px;text-align:left">Endpoint URL</th>
+                  <th style="padding:8px 14px;text-align:left">Token</th>
+                  <th style="padding:8px 14px;text-align:center">Status</th>
+                  <th style="padding:8px 14px;text-align:right">Aksi</th>
+                </tr>
+              </thead>
+              <tbody id="lms-endpoints-tbody">
+                <tr><td colspan="5" style="text-align:center;padding:20px;color:var(--muted);font-style:italic"><i class="fa-solid fa-circle-notch fa-spin"></i> Memuat...</td></tr>
+              </tbody>
+            </table>
+          </div>
+          <!-- Tombol Kirim -->
+          <div class="btn-row">
+            <button class="btn btn-success" id="btn-sync-lms"><i class="fa-solid fa-rotate"></i> Kirim Semua Data ke LMS</button>
           </div>
           <hr class="sep"/>
           <h4 style="margin-bottom:8px"><i class="fa-solid fa-user-check"></i> Atur Ketersediaan Semua Guru</h4>
@@ -1159,21 +1356,32 @@
               </div>
             </div>
 
+            <!-- Rekomendasi Cerdas Formasi & Kunci Guru -->
+            <div class="panel" id="panel-feasibility-recommendations" style="display:none; margin-bottom:16px;">
+              <div class="panel-head" style="margin-bottom:10px;">
+                <span><i class="fa-solid fa-lightbulb" style="color:var(--warn);"></i> Rekomendasi Formasi &amp; Optimalisasi Guru</span>
+                <span class="hint" id="feasibility-rec-count">0 Rekomendasi</span>
+              </div>
+              <div id="feasibility-recommendations-list" style="display:flex; flex-direction:column; gap:8px;">
+                <!-- JS will render recommendation items here -->
+              </div>
+            </div>
+
             <!-- Subject Capacity Table -->
             <div class="panel">
               <div class="panel-head">
-                <span><i class="fa-solid fa-book-open"></i> Analisis Beban &amp; Kapasitas Mengajar Mapel</span>
+                <span><i class="fa-solid fa-book-open"></i> Monitoring Mata Pelajaran &amp; Kapasitas Mengajar Guru</span>
               </div>
               <div class="tbl-wrap">
                 <table id="tbl-feasibility-mapel">
                   <thead>
                     <tr>
-                      <th>Nama Mapel</th>
-                      <th>Kategori</th>
-                      <th>Kebutuhan JP</th>
-                      <th>Pengampu</th>
-                      <th>Kapasitas JP</th>
-                      <th>Tingkat Risiko</th>
+                      <th>Nama Mapel &amp; Kategori</th>
+                      <th>Detail Kebutuhan JP</th>
+                      <th>Kelas Pemakai</th>
+                      <th>Guru Qualified (Tab 5)</th>
+                      <th>Kapasitas vs Demand</th>
+                      <th>Status Kelayakan</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -1219,6 +1427,87 @@
         </div>
       </div><!-- /pg-feasibility -->
 
+      <!-- Ketersediaan Hari Mengajar Guru -->
+      <div class="page" id="pg-ketersediaan-hari">
+        <div class="panel">
+          <div class="panel-head">
+            <div style="display:flex; align-items:center; gap:16px; flex-wrap:wrap;">
+              <span style="font-size:1.05rem; font-weight:700;"><i class="fa-solid fa-calendar-check" style="color:var(--primary-h);"></i> Ketersediaan Hari Mengajar Guru</span>
+              <div style="display:flex; gap:6px; background:var(--surface2); padding:3px; border-radius:8px; border:1px solid var(--border);">
+                <button class="sub-btn on" id="btn-avail-shift-pagi" style="border:none; margin:0;"><i class="fa-solid fa-sun" style="color:var(--warn)"></i> Shift Pagi</button>
+                <button class="sub-btn" id="btn-avail-shift-siang" style="border:none; margin:0;"><i class="fa-solid fa-moon" style="color:var(--info)"></i> Shift Siang</button>
+              </div>
+            </div>
+            <div style="display:flex; gap:8px;">
+              <button class="btn btn-sm btn-ghost" id="btn-refresh-avail"><i class="fa-solid fa-rotate"></i> Reset / Refresh</button>
+              <button class="btn btn-sm btn-primary" id="btn-save-avail"><i class="fa-solid fa-floppy-disk"></i> Simpan Ketersediaan Hari</button>
+            </div>
+          </div>
+
+          <p class="hint" style="margin-bottom:14px;">
+            Centang hari ketersediaan mengajar untuk masing-masing guru pada shift aktif (Pagi / Siang). Guru diurutkan berdasarkan <strong>Kode Guru (1, 2, 3...)</strong> secara default.
+          </p>
+
+          <div class="tbl-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th style="width:45px; text-align:center;">No</th>
+                  <th style="width:65px; text-align:center;">Kode</th>
+                  <th>Nama Guru</th>
+                  <th style="text-align:center; width:75px;"><span class="badge b-pagi" style="font-size:0.78rem; padding:4px 9px; font-weight:700;">Sen</span></th>
+                  <th style="text-align:center; width:75px;"><span class="badge b-pagi" style="font-size:0.78rem; padding:4px 9px; font-weight:700;">Sel</span></th>
+                  <th style="text-align:center; width:75px;"><span class="badge b-pagi" style="font-size:0.78rem; padding:4px 9px; font-weight:700;">Rab</span></th>
+                  <th style="text-align:center; width:75px;"><span class="badge b-pagi" style="font-size:0.78rem; padding:4px 9px; font-weight:700;">Kam</span></th>
+                  <th style="text-align:center; width:75px;"><span class="badge b-pagi" style="font-size:0.78rem; padding:4px 9px; font-weight:700;">Jum</span></th>
+                  <th style="text-align:center; width:75px;"><span class="badge b-pagi" style="font-size:0.78rem; padding:4px 9px; font-weight:700;">Sab</span></th>
+                  <th style="text-align:center; width:220px;">Aksi Cepat &amp; Detail Jam</th>
+                </tr>
+              </thead>
+              <tbody id="tb-avail-teachers">
+                <tr><td colspan="10" style="text-align:center; color:var(--muted)">Memuat data guru...</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      <!-- Daftar Guru Mutlak -->
+      <div class="page" id="pg-guru-4jp">
+        <div class="panel">
+          <div class="panel-head">
+            <div>
+              <i class="fa-solid fa-clock-rotate-left" style="color:var(--warn); margin-right:6px;"></i>
+              Daftar Guru Mengajar ≥4 JP di Kelas yang Sama
+            </div>
+            <button class="btn btn-sm btn-ghost" id="btn-refresh-guru-4jp"><i class="fa-solid fa-rotate"></i> Refresh Data</button>
+          </div>
+          <p class="hint" style="margin-bottom:14px;">
+            Menampilkan daftar guru yang mengajar 4 Jam Pelajaran (JP) atau lebih pada 1 kelas tertentu dalam sehari (1 baris per kejadian).
+          </p>
+          <div class="tbl-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th style="width: 50px;">No</th>
+                  <th>Kode</th>
+                  <th>Nama Guru</th>
+                  <th>Kelas</th>
+                  <th>Shift</th>
+                  <th>Hari</th>
+                  <th>Total JP</th>
+                  <th>Mapel &amp; Jam Pelajaran</th>
+                  <th>Status</th>
+                </tr>
+              </thead>
+              <tbody id="tb-guru-4jp">
+                <tr><td colspan="9" style="text-align:center; color:var(--muted)">Belum ada data jadwal. Silakan generate jadwal terlebih dahulu.</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
       <!-- Daftar Guru Mutlak -->
       <div class="page" id="pg-guru-mutlak">
         <div class="panel">
@@ -1238,6 +1527,7 @@
                   <th>MATA PELAJARAN</th>
                   <th style="width: 150px; text-align: center;">JUMLAH JAM (JJ)</th>
                   <th style="width: 100px; text-align: center;">TOTAL</th>
+                  <th style="width: 120px; text-align: center;">AKSI</th>
                 </tr>
               </thead>
               <tbody>
@@ -1745,6 +2035,23 @@
               <tbody>
                 <!-- locked classes list -->
               </tbody>
+              <tfoot>
+                <tr style="font-weight: 500; border-top: 1px solid var(--border); color: var(--muted);">
+                  <td colspan="2" style="text-align: left; padding-top: 8px; font-size: 0.75rem;">JP Pagi Terkunci</td>
+                  <td style="padding-top: 8px; font-size: 0.75rem;"><span id="lbl-gm-pagi-jp">0</span> JP</td>
+                  <td></td>
+                </tr>
+                <tr style="font-weight: 500; color: var(--muted);">
+                  <td colspan="2" style="text-align: left; padding-bottom: 8px; font-size: 0.75rem;">JP Siang Terkunci</td>
+                  <td style="padding-bottom: 8px; font-size: 0.75rem;"><span id="lbl-gm-siang-jp">0</span> JP</td>
+                  <td></td>
+                </tr>
+                <tr style="font-weight: bold; border-top: 1px dashed var(--border);">
+                  <td colspan="2" style="text-align: left; padding-top: 8px;">Total JP Terkunci</td>
+                  <td style="padding-top: 8px;"><span id="lbl-gm-total-jp">0</span> JP</td>
+                  <td></td>
+                </tr>
+              </tfoot>
             </table>
           </div>
         </div>
@@ -1908,6 +2215,70 @@
   </div>
 </div>
 
-<script src="app.js?v=21"></script>
+<!-- Modal: Tambah / Edit LMS Endpoint -->
+<div id="modal-lms-endpoint" style="display:none;position:fixed;inset:0;z-index:9999;background:rgba(0,0,0,.7);backdrop-filter:blur(4px);display:none;align-items:center;justify-content:center;padding:16px">
+  <div style="background:var(--surface);border:1px solid var(--border);border-radius:16px;width:100%;max-width:480px;box-shadow:0 20px 60px rgba(0,0,0,.5)">
+    <div style="display:flex;align-items:center;justify-content:space-between;padding:16px 20px;border-bottom:1px solid var(--border)">
+      <h3 id="lms-ep-modal-title" style="margin:0;font-size:1rem">Tambah Endpoint LMS</h3>
+      <button id="btn-lms-ep-close" class="btn btn-ghost btn-sm"><i class="fa-solid fa-xmark"></i></button>
+    </div>
+    <div style="padding:20px">
+      <form class="form" id="form-lms-endpoint">
+        <input type="hidden" id="lms-ep-id">
+        <div class="field">
+          <label>Nama / Label <span style="color:var(--danger)">*</span></label>
+          <input id="lms-ep-label" type="text" placeholder="Contoh: LMS Jakarta, LMS Bekasi" required>
+        </div>
+        <div class="field">
+          <label>Endpoint URL <span style="color:var(--danger)">*</span></label>
+          <input id="lms-ep-url" type="url" placeholder="https://jakarta.lms11maret.xyz/api/v1/sync-all" required style="font-family:'JetBrains Mono',monospace;font-size:.82rem">
+          <span class="hint">URL API pada LMS Laravel yang akan menerima data dari SITAB.</span>
+        </div>
+        <div class="field">
+          <label>Bearer Token (API Key)</label>
+          <input id="lms-ep-token" type="password" placeholder="Token autentikasi">
+          <span class="hint" id="lms-ep-token-hint" style="display:none;color:var(--warn)"><i class="fa-solid fa-info-circle"></i> Kosongkan jika tidak ingin mengganti token.</span>
+        </div>
+        <div class="field">
+          <label>Keterangan (opsional)</label>
+          <input id="lms-ep-ket" type="text" placeholder="Contoh: Endpoint untuk cabang Jakarta Pusat">
+        </div>
+        <div class="modal-foot" style="padding:12px 0 0;border:none;justify-content:flex-end;gap:8px">
+          <button type="button" class="btn btn-ghost" id="btn-lms-ep-cancel">Batal</button>
+          <button type="submit" class="btn btn-primary"><i class="fa-solid fa-floppy-disk"></i> Simpan</button>
+        </div>
+      </form>
+    </div>
+  </div>
+<!-- Modal: Salin Alokasi Waktu Jam -->
+<div id="modal-copy-time-slots" style="display:none;position:fixed;inset:0;z-index:9999;background:rgba(0,0,0,.7);backdrop-filter:blur(4px);align-items:center;justify-content:center;padding:16px">
+  <div style="background:var(--surface);border:1px solid var(--border);border-radius:16px;width:100%;max-width:440px;box-shadow:0 20px 60px rgba(0,0,0,.5)">
+    <div style="display:flex;align-items:center;justify-content:space-between;padding:16px 20px;border-bottom:1px solid var(--border)">
+      <h3 style="margin:0;font-size:1rem"><i class="fa-solid fa-copy" style="color:var(--primary-h)"></i> Salin Alokasi Waktu Jam</h3>
+      <button id="btn-copy-ts-close" class="btn btn-ghost btn-sm"><i class="fa-solid fa-xmark"></i></button>
+    </div>
+    <div style="padding:20px">
+      <p class="hint" style="margin-bottom:14px">
+        Salin alokasi jam dari <strong id="copy-ts-source-day-name">SENIN</strong> ke hari-hari lain di shift yang sama:
+      </p>
+      <form id="form-copy-time-slots">
+        <div style="display:grid; grid-template-columns: 1fr 1fr; gap:10px; margin-bottom:18px;" id="copy-ts-days-checkboxes">
+          <label style="display:flex; align-items:center; gap:8px; cursor:pointer;"><input type="checkbox" value="SELASA" checked> Selasa</label>
+          <label style="display:flex; align-items:center; gap:8px; cursor:pointer;"><input type="checkbox" value="RABU" checked> Rabu</label>
+          <label style="display:flex; align-items:center; gap:8px; cursor:pointer;"><input type="checkbox" value="KAMIS" checked> Kamis</label>
+          <label style="display:flex; align-items:center; gap:8px; cursor:pointer;"><input type="checkbox" value="JUMAT"> Jumat</label>
+          <label style="display:flex; align-items:center; gap:8px; cursor:pointer;"><input type="checkbox" value="SABTU"> Sabtu</label>
+          <label style="display:flex; align-items:center; gap:8px; cursor:pointer;"><input type="checkbox" value="SENIN"> Senin</label>
+        </div>
+        <div class="modal-foot" style="padding:12px 0 0;border:none;justify-content:flex-end;gap:8px">
+          <button type="button" class="btn btn-ghost" id="btn-copy-ts-cancel">Batal</button>
+          <button type="submit" class="btn btn-primary"><i class="fa-solid fa-clone"></i> Salin Jam Ke Hari</button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+
+<script src="app.js?v=32"></script>
 </body>
 </html>

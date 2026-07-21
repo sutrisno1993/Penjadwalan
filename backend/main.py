@@ -18,7 +18,7 @@ except ImportError:
     pass
 
 import pymysql
-from fastapi import FastAPI, HTTPException, UploadFile, File
+from fastapi import FastAPI, HTTPException, UploadFile, File, Request
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
@@ -26,15 +26,19 @@ from openpyxl import Workbook
 
 from backend.database import (
     init_db, get_db_connection, db_fetchall, db_fetchone,
-    get_setting, save_setting, clear_master_data, active_branch,
+    get_setting, save_setting, clear_master_data, active_branch, set_thread_branch,
+    get_all_lms_endpoints, create_lms_endpoint, update_lms_endpoint,
+    delete_lms_endpoint, set_active_lms_endpoint, get_active_lms_endpoint,
+    get_current_db_name, get_branch_name,
 )
 from backend.models import (
-    Teacher, TeacherCreate,
+    Teacher, TeacherCreate, TeacherAvailabilityBatchItem,
     Class,   ClassCreate,
     Subject, SubjectCreate,
     ClassSubject, ClassSubjectCreate,
     TeacherSubject, TeacherSubjectCreate,
     SettingsUpdate, AllocationUpdate, AllocationCopy,
+    TimeSlotItem, TimeSlotBulkSave, TimeSlotCopy,
 )
 from backend.solver import generate_timetable, _diagnose_infeasibility, _preflight
 from backend.sheets import (
@@ -59,19 +63,7 @@ app.add_middleware(
 
 @app.middleware("http")
 async def db_schema_middleware(request, call_next):
-    # Dapatkan cabang dari query params atau header X-Branch
-    branch = request.query_params.get("branch", "").strip().lower()
-    if not branch:
-        branch = request.headers.get("X-Branch", "bekasi").strip().lower()
-    if branch not in ["bekasi", "jakarta"]:
-        branch = "bekasi"
-        
-    token = active_branch.set(branch)
-    try:
-        response = await call_next(request)
-        return response
-    finally:
-        active_branch.reset(token)
+    return await call_next(request)
 
 DAYS_ORDER   = ["SENIN", "SELASA", "RABU", "KAMIS", "JUMAT", "SABTU"]
 SHIFT_LIMITS = {
@@ -83,6 +75,13 @@ SHIFT_LIMITS = {
 # ═══════════════════════════════════════════════
 #  Settings
 # ═══════════════════════════════════════════════
+
+@app.get("/api/info")
+def get_app_info():
+    return {
+        "db_name": get_current_db_name(),
+        "branch_name": get_branch_name()
+    }
 
 @app.get("/api/settings")
 def get_system_settings():
@@ -105,6 +104,141 @@ def update_system_settings(body: SettingsUpdate):
     save_setting("lms_api_url",      body.lms_api_url or "")
     save_setting("lms_api_key",      body.lms_api_key or "")
     return {"status": "SUCCESS", "message": "Pengaturan berhasil disimpan!"}
+
+
+# ═══════════════════════════════════════════════
+#  Time Slot Settings (Waktu Jam Pelajaran per Hari & Shift)
+# ═══════════════════════════════════════════════
+
+
+
+# ═══════════════════════════════════════════════
+#  JP Limit Settings (Batas JP per Guru per Kelas per Hari)
+# ═══════════════════════════════════════════════
+
+from pydantic import BaseModel as _BM
+
+@app.get("/api/settings/jp-limits")
+def get_jp_limits():
+    """Ambil batas JP per guru per kelas per hari (ideal & darurat) serta aturan multi-mapel."""
+    try:
+        ideal   = int(get_setting("max_jp_ideal",   "3"))
+        darurat = int(get_setting("max_jp_darurat", "4"))
+        split_multi = get_setting("split_multi_subject_teacher_days", "true").lower() == "true"
+        multi_threshold = int(get_setting("multi_subject_jp_threshold", "4"))
+    except (ValueError, TypeError):
+        ideal, darurat, split_multi, multi_threshold = 3, 4, True, 4
+    return {
+        "max_jp_ideal": ideal,
+        "max_jp_darurat": darurat,
+        "split_multi_subject": split_multi,
+        "multi_subject_jp_threshold": multi_threshold,
+    }
+
+
+class JpLimitsUpdate(_BM):
+    max_jp_ideal:   int
+    max_jp_darurat: int
+    split_multi_subject: bool = True
+    multi_subject_jp_threshold: int = 4
+
+
+@app.post("/api/settings/jp-limits")
+def update_jp_limits(body: JpLimitsUpdate):
+    """Simpan batas JP per guru per kelas per hari & aturan pemisahan hari guru multi-mapel."""
+    if body.max_jp_ideal < 1 or body.max_jp_darurat < 1:
+        raise HTTPException(400, "Nilai batas JP minimal 1.")
+    if body.max_jp_ideal > body.max_jp_darurat:
+        raise HTTPException(400, "Batas ideal tidak boleh melebihi batas darurat.")
+    if body.multi_subject_jp_threshold < 1:
+        raise HTTPException(400, "Batas threshold jam multi-mapel minimal 1 JP.")
+
+    save_setting("max_jp_ideal",   str(body.max_jp_ideal))
+    save_setting("max_jp_darurat", str(body.max_jp_darurat))
+    save_setting("split_multi_subject_teacher_days", "true" if body.split_multi_subject else "false")
+    save_setting("multi_subject_jp_threshold", str(body.multi_subject_jp_threshold))
+
+    return {
+        "status": "SUCCESS",
+        "message": f"Pengaturan disimpan: ideal={body.max_jp_ideal} JP, darurat={body.max_jp_darurat} JP, pisah_hari={body.split_multi_subject}, threshold={body.multi_subject_jp_threshold} JP.",
+        "max_jp_ideal":   body.max_jp_ideal,
+        "max_jp_darurat": body.max_jp_darurat,
+        "split_multi_subject": body.split_multi_subject,
+        "multi_subject_jp_threshold": body.multi_subject_jp_threshold,
+    }
+
+
+# ═══════════════════════════════════════════════
+#  LMS Endpoint Management (daftar endpoint, pilih aktif)
+# ═══════════════════════════════════════════════
+
+
+class LmsEndpointCreate(_BM):
+    nama_label:   str
+    endpoint_url: str
+    bearer_token: str
+    keterangan:   str = ""
+
+class LmsEndpointUpdate(_BM):
+    nama_label:   str
+    endpoint_url: str
+    bearer_token: str = ""   # kosong = tidak ganti token
+    keterangan:   str = ""
+
+
+@app.get("/api/lms-endpoints")
+def list_lms_endpoints():
+    rows = get_all_lms_endpoints()
+    # Sembunyikan token asli, hanya tampilkan 6 karakter pertama
+    result = []
+    for r in rows:
+        d = dict(r)
+        token = d.get("bearer_token", "")
+        d["bearer_token_preview"] = token[:6] + "*" * max(0, len(token) - 6) if token else ""
+        d["bearer_token"] = ""  # jangan expose ke frontend
+        result.append(d)
+    return result
+
+
+@app.post("/api/lms-endpoints")
+def add_lms_endpoint(body: LmsEndpointCreate):
+    new_ep = create_lms_endpoint(
+        nama_label=body.nama_label,
+        endpoint_url=body.endpoint_url,
+        bearer_token=body.bearer_token,
+        keterangan=body.keterangan,
+    )
+    return {"status": "SUCCESS", "message": f"Endpoint '{body.nama_label}' berhasil ditambahkan.", "data": new_ep}
+
+
+@app.put("/api/lms-endpoints/{endpoint_id}")
+def edit_lms_endpoint(endpoint_id: int, body: LmsEndpointUpdate):
+    ok = update_lms_endpoint(
+        endpoint_id=endpoint_id,
+        nama_label=body.nama_label,
+        endpoint_url=body.endpoint_url,
+        bearer_token=body.bearer_token or None,
+        keterangan=body.keterangan,
+    )
+    if not ok:
+        raise HTTPException(404, "Endpoint tidak ditemukan.")
+    return {"status": "SUCCESS", "message": "Endpoint berhasil diperbarui."}
+
+
+@app.delete("/api/lms-endpoints/{endpoint_id}")
+def remove_lms_endpoint(endpoint_id: int):
+    ok = delete_lms_endpoint(endpoint_id)
+    if not ok:
+        raise HTTPException(404, "Endpoint tidak ditemukan.")
+    return {"status": "SUCCESS", "message": "Endpoint berhasil dihapus."}
+
+
+@app.post("/api/lms-endpoints/{endpoint_id}/set-active")
+def activate_lms_endpoint(endpoint_id: int):
+    ok = set_active_lms_endpoint(endpoint_id)
+    if not ok:
+        raise HTTPException(404, "Endpoint tidak ditemukan.")
+    return {"status": "SUCCESS", "message": "Endpoint aktif berhasil diperbarui."}
 
 
 # ═══════════════════════════════════════════════
@@ -231,8 +365,14 @@ def sync_to_lms():
         lms_url = get_setting("lms_api_url", "").strip()
         lms_key = get_setting("lms_api_key", "").strip()
         
+        # Prioritaskan endpoint aktif dari tabel lms_endpoints
+        active_ep = get_active_lms_endpoint()
+        if active_ep:
+            lms_url = active_ep["endpoint_url"].strip()
+            lms_key = active_ep["bearer_token"].strip()
+        
         if not lms_url or not lms_key:
-            raise HTTPException(400, "LMS API URL dan API Key belum dikonfigurasi di Pengaturan!")
+            raise HTTPException(400, "Belum ada endpoint LMS yang aktif! Tambahkan dan pilih endpoint di bagian Daftar Endpoint LMS.")
             
         # Normalisasi URL agar selalu mengarah ke endpoint API /api/v1/sync-all
         # Mengatasi kasus jika user menginput domain utama atau URL halaman admin login
@@ -857,16 +997,36 @@ def get_feasibility():
                     "guru_libur": guru_libur
                 })
 
-        # 2. Subject Capacity Map
+        # 2. Subject Capacity & Shift Breakdown Map
         subject_capacities = []
-        # Group allocations by subject
-        subject_demand = {} # mapel_id -> total_jp_required
-        subject_classes = {} # mapel_id -> list of class names
+        recommendations = []
+
+        # Group allocations by subject & shift
+        subject_demand_pagi = {}   # mapel_id -> total_jp_pagi
+        subject_demand_siang = {}  # mapel_id -> total_jp_siang
+        subject_classes_pagi = {}  # mapel_id -> list of class names (pagi)
+        subject_classes_siang = {} # mapel_id -> list of class names (siang)
+        
+        # Allocations with id_guru_mutlak for optimization check
+        locked_pagi_teacher_jp = {} # (id_guru, id_kelas) -> total_jp
+
         for a in allocations:
             mid = a["id_mapel"]
-            subject_demand[mid] = subject_demand.get(mid, 0) + a["durasi_jp"]
-            subject_classes.setdefault(mid, []).append(a["nama_kelas"])
-            
+            shift = str(a.get("shift_operasional") or "").strip().upper()
+            dur = a["durasi_jp"]
+            kname = a["nama_kelas"]
+
+            if shift == "PAGI":
+                subject_demand_pagi[mid]  = subject_demand_pagi.get(mid, 0) + dur
+                subject_classes_pagi.setdefault(mid, []).append(kname)
+            elif shift == "SIANG":
+                subject_demand_siang[mid] = subject_demand_siang.get(mid, 0) + dur
+                subject_classes_siang.setdefault(mid, []).append(kname)
+
+            if a.get("id_guru_mutlak") and shift == "PAGI":
+                key = (a["id_guru_mutlak"], a["id_kelas"], kname)
+                locked_pagi_teacher_jp[key] = locked_pagi_teacher_jp.get(key, 0) + dur
+
         # Group teachers by subject qualifications
         subject_teachers = {} # mapel_id -> list of teachers qualified
         for ts in ts_rows:
@@ -874,52 +1034,116 @@ def get_feasibility():
             gid = ts["id_guru"]
             if gid in teachers_map:
                 subject_teachers.setdefault(mid, []).append(teachers_map[gid])
-                
+
         for s in subjects:
             mid = s["id_mapel"]
-            demand = subject_demand.get(mid, 0)
+            dem_pagi  = subject_demand_pagi.get(mid, 0)
+            dem_siang = subject_demand_siang.get(mid, 0)
+            demand    = dem_pagi + dem_siang
+
             if demand == 0:
                 continue # Skip mapel yang tidak dipakai di alokasi kurikulum
-                
+
+            cls_pagi  = list(set(subject_classes_pagi.get(mid, [])))
+            cls_siang = list(set(subject_classes_siang.get(mid, [])))
+            cls_all   = list(set(cls_pagi + cls_siang))
+
             qualified_teachers = subject_teachers.get(mid, [])
+            teachers_pagi  = [t for t in qualified_teachers if t["shift_pagi"]]
+            teachers_siang = [t for t in qualified_teachers if t["shift_siang"]]
+
+            cap_pagi  = sum(t["max_jp"] if t["max_jp"] is not None else 60 for t in teachers_pagi)
+            cap_siang = sum(t["max_jp"] if t["max_jp"] is not None else 60 for t in teachers_siang)
             total_capacity = sum(t["max_jp"] if t["max_jp"] is not None else 60 for t in qualified_teachers)
-            
+
             gurus_info = []
             for t in qualified_teachers:
                 gurus_info.append({
-                    "id_guru": t["id_guru"],
-                    "nama_guru": t["nama_guru"],
-                    "kode_guru": t["kode_guru"],
-                    "max_jp": t["max_jp"] if t["max_jp"] is not None else 60
+                    "id_guru":    t["id_guru"],
+                    "nama_guru":  t["nama_guru"],
+                    "kode_guru":  t["kode_guru"],
+                    "shift_pagi": t["shift_pagi"],
+                    "shift_siang":t["shift_siang"],
+                    "max_jp":     t["max_jp"] if t["max_jp"] is not None else 60
                 })
-                
+
             if len(qualified_teachers) == 0:
-                status = "RED" # No teachers at all
+                status = "RED" # Belum ada guru
+                recommendations.append({
+                    "type": "NO_TEACHER",
+                    "severity": "DANGER",
+                    "icon": "fa-user-slash",
+                    "title": f"Mapel [{s['nama_mapel']}] Belum Punya Guru",
+                    "text": f"Mapel [{s['nama_mapel']}] digunakan di {len(cls_all)} kelas (Total {demand} JP), tetapi belum ada guru yang berkualifikasi di Tab 5 (Teacher Subjects)."
+                })
+            elif dem_pagi > cap_pagi or dem_siang > cap_siang:
+                status = "RED" # Kebutuhan melebihi kapasitas per shift
+                if dem_pagi > cap_pagi:
+                    recommendations.append({
+                        "type": "DEFICIENT_SHIFT_PAGI",
+                        "severity": "DANGER",
+                        "icon": "fa-sun",
+                        "title": f"Mapel [{s['nama_mapel']}] Kekurangan Guru (Shift Pagi)",
+                        "text": f"Shift PAGI butuh {dem_pagi} JP untuk {len(cls_pagi)} kelas, tetapi kapasitas guru pengampu aktif Pagi hanya {cap_pagi} JP. Tambahkan kualifikasi guru di Tab 5 atau aktifkan shift Pagi guru pengampu."
+                    })
+                if dem_siang > cap_siang:
+                    recommendations.append({
+                        "type": "DEFICIENT_SHIFT_SIANG",
+                        "severity": "DANGER",
+                        "icon": "fa-moon",
+                        "title": f"Mapel [{s['nama_mapel']}] Kekurangan Guru (Shift Siang)",
+                        "text": f"Shift SIANG butuh {dem_siang} JP untuk {len(cls_siang)} kelas, tetapi kapasitas guru pengampu aktif Siang hanya {cap_siang} JP."
+                    })
             elif total_capacity < demand:
-                status = "RED" # Not enough capacity
+                status = "RED"
             elif demand > 0.85 * total_capacity:
-                status = "YELLOW" # Tight capacity (> 85%)
+                status = "YELLOW"
             else:
-                status = "GREEN" # Safe
-                
+                status = "GREEN"
+
             subject_capacities.append({
-                "id_mapel": mid,
-                "nama_mapel": s["nama_mapel"],
-                "kategori_mapel": s["kategori_mapel"],
-                "total_jp_butuh": demand,
-                "n_guru": len(qualified_teachers),
-                "total_jp_kapasitas": total_capacity,
-                "status": status,
-                "guru_pengampu": gurus_info,
-                "kelas_pemakai": list(set(subject_classes.get(mid, [])))
+                "id_mapel":            mid,
+                "nama_mapel":          s["nama_mapel"],
+                "kategori_mapel":      s["kategori_mapel"],
+                "jp_pagi":             dem_pagi,
+                "jp_siang":            dem_siang,
+                "total_jp_butuh":      demand,
+                "n_kelas_pagi":        len(cls_pagi),
+                "n_kelas_siang":       len(cls_siang),
+                "n_kelas_total":       len(cls_all),
+                "kelas_pemakai_pagi":  cls_pagi,
+                "kelas_pemakai_siang": cls_siang,
+                "kelas_pemakai":        cls_all,
+                "n_guru":              len(qualified_teachers),
+                "n_guru_pagi":         len(teachers_pagi),
+                "n_guru_siang":        len(teachers_siang),
+                "cap_pagi":            cap_pagi,
+                "cap_siang":           cap_siang,
+                "total_jp_kapasitas":  total_capacity,
+                "status":              status,
+                "guru_pengampu":       gurus_info,
             })
-            
+
+        # 3. Analisis Rekomendasi Kunci Guru (Guru Mutlak Optimization Check)
+        for (gid, cid, kname), locked_dur in locked_pagi_teacher_jp.items():
+            g = teachers_map.get(gid)
+            if g and locked_dur <= 4:
+                recommendations.append({
+                    "type": "GURU_MUTLAK_PAGI_LOW",
+                    "severity": "WARNING",
+                    "icon": "fa-key",
+                    "title": f"Saran Formasi: Kunci Guru [{g['nama_guru']}] di Pagi",
+                    "text": f"Guru [{g['nama_guru']}] dikunci (Guru Mutlak) di kelas Pagi [{kname}] hanya untuk total {locked_dur} JP. Disarankan untuk tidak dikunci di Pagi agar slot waktu Pagi guru ini bisa dimanfaatkan secara lebih fleksibel."
+                })
+
         return {
-            "daily_coverage": daily_coverage,
-            "subject_capacities": subject_capacities
+            "daily_coverage":     daily_coverage,
+            "subject_capacities": subject_capacities,
+            "recommendations":    recommendations
         }
     finally:
         conn.close()
+
 
 
 # ═══════════════════════════════════════════════
@@ -984,8 +1208,13 @@ def delete_timetable():
 
 
 @app.get("/api/timetable/download")
-def download_timetable():
+def download_timetable(branch: str = "bekasi"):
     try:
+        branch = branch.strip().lower()
+        if branch not in ["bekasi", "jakarta"]:
+            branch = "bekasi"
+        active_branch.set(branch)
+        
         buf, filename = generate_excel_timetable()
         return StreamingResponse(
             buf,
@@ -1010,8 +1239,8 @@ def get_teachers():
         d["hari_tersedia"]       = json.loads(d["hari_tersedia"] or "[]")
         d["shift_pagi"]          = bool(d["shift_pagi"])
         d["shift_siang"]         = bool(d["shift_siang"])
-        d["hari_tersedia_pagi"]  = json.loads(d["hari_tersedia_pagi"])  if d.get("hari_tersedia_pagi")  else None
-        d["hari_tersedia_siang"] = json.loads(d["hari_tersedia_siang"]) if d.get("hari_tersedia_siang") else None
+        d["hari_tersedia_pagi"]  = json.loads(d["hari_tersedia_pagi"])  if d.get("hari_tersedia_pagi") is not None else d["hari_tersedia"]
+        d["hari_tersedia_siang"] = json.loads(d["hari_tersedia_siang"]) if d.get("hari_tersedia_siang") is not None else d["hari_tersedia"]
         d["min_jp"]              = d.get("min_jp")
         d["max_jp"]              = d.get("max_jp")
         d["allowed_jp_pagi"]     = json.loads(d["allowed_jp_pagi"])     if d.get("allowed_jp_pagi")     else None
@@ -1029,8 +1258,7 @@ def create_teacher(body: TeacherCreate):
                  hari_tersedia_pagi, hari_tersedia_siang, min_jp, max_jp,
                  allowed_jp_pagi, allowed_jp_siang, no_wa)
             VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
-            RETURNING id_guru
-        """, (
+            """, (
             body.nama_guru, body.kode_guru,
             json.dumps(body.hari_tersedia),
             body.shift_pagi, body.shift_siang,
@@ -1043,11 +1271,60 @@ def create_teacher(body: TeacherCreate):
             body.no_wa,
         ))
         conn.commit()
-        new_id = cur.fetchone()["id_guru"]
+        new_id = cur.lastrowid
         return {**body.model_dump(), "id_guru": new_id}
     except pymysql.err.IntegrityError:
         conn.rollback()
         raise HTTPException(400, f"Kode guru {body.kode_guru} sudah terdaftar!")
+    finally:
+        cur.close(); conn.close()
+
+@app.put("/api/teachers/availability")
+def update_teachers_availability(items: List[TeacherAvailabilityBatchItem]):
+    conn = get_db_connection()
+    cur  = conn.cursor()
+    try:
+        for item in items:
+            pagi_json  = json.dumps(item.hari_tersedia_pagi)
+            siang_json = json.dumps(item.hari_tersedia_siang)
+            combined_days = list(dict.fromkeys(item.hari_tersedia_pagi + item.hari_tersedia_siang))
+            hari_tersedia_json = json.dumps(combined_days)
+            cur.execute("""
+                UPDATE teachers SET
+                    hari_tersedia = %s,
+                    hari_tersedia_pagi = %s,
+                    hari_tersedia_siang = %s
+                WHERE id_guru = %s
+            """, (hari_tersedia_json, pagi_json, siang_json, item.id_guru))
+        conn.commit()
+        return {"status": "SUCCESS", "updated_count": len(items)}
+    except Exception as e:
+        conn.rollback()
+        raise HTTPException(500, f"Gagal update ketersediaan hari: {e}")
+    finally:
+        cur.close(); conn.close()
+
+@app.put("/api/teachers/{id_guru}/availability")
+def update_single_teacher_availability(id_guru: int, body: TeacherAvailabilityBatchItem):
+    conn = get_db_connection()
+    cur  = conn.cursor()
+    try:
+        pagi_json  = json.dumps(body.hari_tersedia_pagi)
+        siang_json = json.dumps(body.hari_tersedia_siang)
+        combined_days = list(dict.fromkeys(body.hari_tersedia_pagi + body.hari_tersedia_siang))
+        hari_tersedia_json = json.dumps(combined_days)
+        cur.execute("""
+            UPDATE teachers SET
+                hari_tersedia = %s,
+                hari_tersedia_pagi = %s,
+                hari_tersedia_siang = %s
+            WHERE id_guru = %s
+        """, (hari_tersedia_json, pagi_json, siang_json, id_guru))
+        conn.commit()
+        return {"status": "SUCCESS", "id_guru": id_guru}
+    except Exception as e:
+        conn.rollback()
+        raise HTTPException(500, f"Gagal update ketersediaan hari: {e}")
     finally:
         cur.close(); conn.close()
 
@@ -1064,7 +1341,7 @@ def update_teacher(id_guru: int, body: TeacherCreate):
                 min_jp = %s, max_jp = %s,
                 allowed_jp_pagi = %s, allowed_jp_siang = %s,
                 no_wa = %s
-            WHERE id_guru = %s RETURNING id_guru
+            WHERE id_guru = %s
         """, (
             body.nama_guru, body.kode_guru,
             json.dumps(body.hari_tersedia),
@@ -1079,8 +1356,6 @@ def update_teacher(id_guru: int, body: TeacherCreate):
             id_guru,
         ))
         conn.commit()
-        if not cur.fetchone():
-            raise HTTPException(404, "Guru tidak ditemukan")
         return {**body.model_dump(), "id_guru": id_guru}
     except pymysql.err.IntegrityError:
         conn.rollback()
@@ -1127,11 +1402,11 @@ def create_class(body: ClassCreate):
         tingkat = body.tingkat or tk
         jurusan = body.jurusan or jr
         cur.execute(
-            "INSERT INTO classes (nama_kelas, shift_operasional, tingkat, jurusan) VALUES (%s,%s,%s,%s) RETURNING id_kelas",
+            "INSERT INTO classes (nama_kelas, shift_operasional, tingkat, jurusan) VALUES (%s,%s,%s,%s) ",
             (nama, shift, tingkat, jurusan)
         )
         conn.commit()
-        new_id = cur.fetchone()["id_kelas"]
+        new_id = cur.lastrowid
         return {**body.model_dump(), "id_kelas": new_id, "tingkat": tingkat, "jurusan": jurusan}
     except pymysql.err.IntegrityError:
         conn.rollback()
@@ -1151,11 +1426,10 @@ def update_class(id_kelas: int, body: ClassCreate):
         jurusan = body.jurusan or jr
         cur.execute("""
             UPDATE classes SET nama_kelas=%s, shift_operasional=%s, tingkat=%s, jurusan=%s
-            WHERE id_kelas=%s RETURNING id_kelas
+            WHERE id_kelas=%s
         """, (nama, shift, tingkat, jurusan, id_kelas))
         conn.commit()
-        if not cur.fetchone():
-            raise HTTPException(404, "Kelas tidak ditemukan")
+        
         return {**body.model_dump(), "id_kelas": id_kelas, "tingkat": tingkat, "jurusan": jurusan}
     except pymysql.err.IntegrityError:
         conn.rollback()
@@ -1202,13 +1476,13 @@ def create_subject(body: SubjectCreate):
     cur  = conn.cursor()
     try:
         cur.execute(
-            "INSERT INTO subjects (nama_mapel, kategori_mapel, tingkat, jurusan) VALUES (%s,%s,%s,%s) RETURNING id_mapel",
+            "INSERT INTO subjects (nama_mapel, kategori_mapel, tingkat, jurusan) VALUES (%s,%s,%s,%s) ",
             (body.nama_mapel.strip(), body.kategori_mapel.upper(),
              body.tingkat.strip().upper() if body.tingkat else None,
              body.jurusan.strip().upper() if body.jurusan else None)
         )
         conn.commit()
-        new_id = cur.fetchone()["id_mapel"]
+        new_id = cur.lastrowid
         return {**body.model_dump(), "id_mapel": new_id}
     finally:
         cur.close(); conn.close()
@@ -1220,7 +1494,7 @@ def update_subject(id_mapel: int, body: SubjectCreate):
     try:
         cur.execute("""
             UPDATE subjects SET nama_mapel=%s, kategori_mapel=%s, tingkat=%s, jurusan=%s
-            WHERE id_mapel=%s RETURNING id_mapel
+            WHERE id_mapel=%s
         """, (
             body.nama_mapel.strip(), body.kategori_mapel.upper(),
             body.tingkat.strip().upper() if body.tingkat else None,
@@ -1228,8 +1502,7 @@ def update_subject(id_mapel: int, body: SubjectCreate):
             id_mapel,
         ))
         conn.commit()
-        if not cur.fetchone():
-            raise HTTPException(404, "Mata pelajaran tidak ditemukan")
+        
         return {**body.model_dump(), "id_mapel": id_mapel}
     finally:
         cur.close(); conn.close()
@@ -1268,11 +1541,11 @@ def create_allocation(body: ClassSubjectCreate):
     cur  = conn.cursor()
     try:
         cur.execute(
-            "INSERT INTO class_subjects (id_kelas, id_mapel, durasi_jp, id_guru_mutlak) VALUES (%s,%s,%s,%s) RETURNING id_class_subject",
+            "INSERT INTO class_subjects (id_kelas, id_mapel, durasi_jp, id_guru_mutlak) VALUES (%s,%s,%s,%s) ",
             (body.id_kelas, body.id_mapel, body.durasi_jp, body.id_guru_mutlak)
         )
         conn.commit()
-        new_id = cur.fetchone()["id_class_subject"]
+        new_id = cur.lastrowid
         row = db_fetchone(conn, """
             SELECT cs.id_class_subject, cs.id_kelas, cs.id_mapel, cs.durasi_jp, cs.id_guru_mutlak,
                    c.nama_kelas, s.nama_mapel, tg.nama_guru AS nama_guru_mutlak
@@ -1308,11 +1581,9 @@ def update_allocation(id_class_subject: int, body: AllocationUpdate):
             UPDATE class_subjects 
             SET durasi_jp = %s, id_guru_mutlak = %s
             WHERE id_class_subject = %s 
-            RETURNING id_class_subject
-        """, (body.durasi_jp, body.id_guru_mutlak, id_class_subject))
+            """, (body.durasi_jp, body.id_guru_mutlak, id_class_subject))
         conn.commit()
-        if not cur.fetchone():
-            raise HTTPException(404, "Alokasi tidak ditemukan")
+        
         return {"status": "SUCCESS", "message": "Alokasi berhasil diperbarui"}
     finally:
         cur.close(); conn.close()
@@ -1387,11 +1658,11 @@ def create_teacher_subject(body: TeacherSubjectCreate):
     cur  = conn.cursor()
     try:
         cur.execute(
-            "INSERT INTO teacher_subjects (id_guru, id_mapel) VALUES (%s,%s) RETURNING id_teacher_subject",
+            "INSERT INTO teacher_subjects (id_guru, id_mapel) VALUES (%s,%s) ",
             (body.id_guru, body.id_mapel)
         )
         conn.commit()
-        new_id = cur.fetchone()["id_teacher_subject"]
+        new_id = cur.lastrowid
         row = db_fetchone(conn, """
             SELECT ts.id_teacher_subject, ts.id_guru, ts.id_mapel,
                    t.nama_guru, t.kode_guru, s.nama_mapel
@@ -1441,6 +1712,144 @@ def get_stats():
             "fallback_count":   n_fb,
         }
     finally:
+        conn.close()
+
+
+# ═══════════════════════════════════════════════
+#  Time Slots (Pengaturan Jam Pelajaran & Waktu)
+# ═══════════════════════════════════════════════
+
+@app.get("/api/time-slots")
+def get_time_slots(shift: Optional[str] = None, hari: Optional[str] = None):
+    conn = get_db_connection()
+    try:
+        query = "SELECT * FROM time_slots WHERE 1=1"
+        params = []
+        if shift:
+            query += " AND shift = %s"
+            params.append(shift.upper())
+        if hari:
+            query += " AND hari = %s"
+            params.append(hari.upper())
+        query += " ORDER BY FIELD(hari, 'SENIN','SELASA','RABU','KAMIS','JUMAT','SABTU'), urutan ASC, jam_ke ASC"
+        slots = db_fetchall(conn, query, tuple(params))
+        return slots
+    finally:
+        conn.close()
+
+@app.post("/api/time-slots/bulk")
+def save_time_slots_bulk(payload: TimeSlotBulkSave):
+    conn = get_db_connection()
+    cur  = conn.cursor()
+    try:
+        hari  = payload.hari.upper()
+        shift = payload.shift.upper()
+        
+        # Hapus slot lama untuk hari & shift ini
+        cur.execute("DELETE FROM time_slots WHERE hari = %s AND shift = %s", (hari, shift))
+        
+        # Insert slot baru
+        insert_data = []
+        for idx, item in enumerate(payload.slots, start=1):
+            insert_data.append((
+                hari,
+                shift,
+                item.jam_ke if item.tipe_slot == 'KBM' else None,
+                item.tipe_slot.upper(),
+                item.jam_mulai,
+                item.jam_selesai,
+                item.keterangan or ('Jam Ke-' + str(item.jam_ke) if item.jam_ke else item.tipe_slot),
+                item.urutan or idx
+            ))
+        
+        if insert_data:
+            cur.executemany(
+                "INSERT INTO time_slots (hari, shift, jam_ke, tipe_slot, jam_mulai, jam_selesai, keterangan, urutan) "
+                "VALUES (%s, %s, %s, %s, %s, %s, %s, %s)",
+                insert_data
+            )
+        
+        conn.commit()
+        return {"status": "SUCCESS", "message": f"Waktu slot untuk {hari} ({shift}) berhasil disimpan", "count": len(insert_data)}
+    except Exception as e:
+        conn.rollback()
+        logger.error(f"Gagal menyimpan time slots: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        cur.close()
+        conn.close()
+
+@app.post("/api/time-slots/copy")
+def copy_time_slots(payload: TimeSlotCopy):
+    conn = get_db_connection()
+    cur  = conn.cursor()
+    try:
+        hari_asal = payload.hari_asal.upper()
+        shift     = payload.shift.upper()
+        
+        # Ambil slot sumber
+        cur.execute("SELECT * FROM time_slots WHERE hari = %s AND shift = %s ORDER BY urutan ASC", (hari_asal, shift))
+        source_slots = cur.fetchall()
+        
+        if not source_slots:
+            raise HTTPException(status_code=400, detail=f"Tidak ada alokasi waktu di hari {hari_asal}")
+            
+        for h_tujuan in payload.hari_tujuan:
+            h_tujuan_clean = h_tujuan.upper()
+            if h_tujuan_clean == hari_asal:
+                continue
+            cur.execute("DELETE FROM time_slots WHERE hari = %s AND shift = %s", (h_tujuan_clean, shift))
+            
+            new_data = [
+                (h_tujuan_clean, shift, slot['jam_ke'], slot['tipe_slot'], slot['jam_mulai'], slot['jam_selesai'], slot['keterangan'], slot['urutan'])
+                for slot in source_slots
+            ]
+            cur.executemany(
+                "INSERT INTO time_slots (hari, shift, jam_ke, tipe_slot, jam_mulai, jam_selesai, keterangan, urutan) "
+                "VALUES (%s, %s, %s, %s, %s, %s, %s, %s)",
+                new_data
+            )
+            
+        conn.commit()
+        return {"status": "SUCCESS", "message": f"Alokasi waktu berhasil disalin dari {hari_asal} ke {', '.join(payload.hari_tujuan)}"}
+    except HTTPException:
+        conn.rollback()
+        raise
+    except Exception as e:
+        conn.rollback()
+        logger.error(f"Gagal salin time slots: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        cur.close()
+        conn.close()
+
+@app.post("/api/time-slots/reset")
+def reset_time_slots():
+    conn = get_db_connection()
+    cur  = conn.cursor()
+    try:
+        cur.execute("TRUNCATE TABLE time_slots;")
+        from backend.database import _seed_default_time_slots
+        _seed_default_time_slots(cur)
+        conn.commit()
+        return {"status": "SUCCESS", "message": "Alokasi waktu jam pelajaran berhasil di-reset ke default"}
+    except Exception as e:
+        conn.rollback()
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        cur.close()
+        conn.close()
+
+@app.delete("/api/time-slots/{id_slot}")
+def delete_time_slot(id_slot: int):
+    conn = get_db_connection()
+    cur  = conn.cursor()
+    try:
+        cur.execute("DELETE FROM time_slots WHERE id_slot = %s", (id_slot,))
+        conn.commit()
+        return {"status": "SUCCESS", "message": "Slot jam berhasil dihapus"}
+    finally:
+        cur.close()
         conn.close()
 
 

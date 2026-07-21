@@ -6,7 +6,7 @@ import openpyxl
 from openpyxl.styles import Font, Alignment, Border, Side, PatternFill
 from openpyxl.utils import get_column_letter
 
-from backend.database import get_db_connection, db_fetchall, get_setting
+from backend.database import get_db_connection, db_fetchall, get_setting, active_branch
 
 logger = logging.getLogger(__name__)
 
@@ -34,84 +34,63 @@ def style_range(ws, start_row, start_col, end_row, end_col, border=None, fill=No
             if font is not None:
                 cell.font = font
 
-def get_wall_clock_time(day, shift, jp):
-    """Mendapatkan jam pelajaran sesuai dengan standard sekolah."""
+def get_wall_clock_time(day, shift, jp, conn=None):
+    """Mendapatkan jam pelajaran sesuai dengan data time_slots atau fallback standard."""
+    if conn:
+        try:
+            cur = conn.cursor()
+            cur.execute(
+                "SELECT jam_mulai, jam_selesai FROM time_slots "
+                "WHERE hari = %s AND shift = %s AND jam_ke = %s AND tipe_slot = 'KBM' LIMIT 1",
+                (day.upper(), shift.upper(), jp)
+            )
+            row = cur.fetchone()
+            cur.close()
+            if row:
+                return f"{row['jam_mulai']} - {row['jam_selesai']}"
+        except Exception:
+            pass
+
+    # Fallback jika belum terisi di DB
     if shift == "PAGI":
         if day == "JUMAT":
-            slots = [
-                "07:00 - 07:40",
-                "07:40 - 08:20",
-                "08:20 - 09:00",
-                "09:00 - 09:40",
-                "10:00 - 10:40",
-                "10:40 - 11:20"
-            ]
+            slots = ["07:00 - 07:40", "07:40 - 08:20", "08:20 - 09:00", "09:00 - 09:40", "10:10 - 10:50", "10:50 - 11:30"]
             return slots[jp - 1] if 1 <= jp <= len(slots) else ""
         elif day == "SENIN":
-            slots = [
-                "06:30 - 07:30", # Upacara
-                "07:30 - 08:10",
-                "08:10 - 08:50",
-                "08:50 - 09:30",
-                "10:00 - 10:35",
-                "10:35 - 11:10",
-                "11:10 - 11:45"
-            ]
+            slots = ["07:30 - 08:10", "08:10 - 08:50", "08:50 - 09:30", "10:00 - 10:35", "10:35 - 11:10", "11:10 - 11:45", "11:45 - 12:20"]
             return slots[jp - 1] if 1 <= jp <= len(slots) else ""
-        else: # SELASA, RABU, KAMIS, SABTU
-            slots = [
-                "07:00 - 07:45",
-                "07:45 - 08:30",
-                "08:30 - 09:15",
-                "09:15 - 10:00",
-                "10:30 - 11:15",
-                "11:15 - 12:00",
-                "12:00 - 12:45"
-            ]
+        else:
+            slots = ["07:00 - 07:45", "07:45 - 08:30", "08:30 - 09:15", "09:15 - 10:00", "10:30 - 11:15", "11:15 - 12:00", "12:00 - 12:45"]
             return slots[jp - 1] if 1 <= jp <= len(slots) else ""
-    else: # SIANG
-        if day == "JUMAT":
-            slots = [
-                "13:00 - 13:40",
-                "13:40 - 14:20",
-                "14:20 - 15:00",
-                "15:00 - 15:40",
-                "16:00 - 16:40",
-                "16:40 - 17:20"
-            ]
-            return slots[jp - 1] if 1 <= jp <= len(slots) else ""
-        elif day == "SABTU":
-            slots = [
-                "12:45 - 13:30",
-                "13:30 - 14:15",
-                "14:15 - 15:00",
-                "15:00 - 15:45",
-                "16:15 - 17:00",
-                "17:00 - 17:45"
-            ]
-            return slots[jp - 1] if 1 <= jp <= len(slots) else ""
-        else: # SENIN, SELASA, RABU, KAMIS
-            slots = [
-                "12:45 - 13:30",
-                "13:30 - 14:15",
-                "14:15 - 15:00",
-                "15:00 - 15:45",
-                "16:15 - 17:00",
-                "17:00 - 17:45",
-                "17:45 - 18:30"
-            ]
-            return slots[jp - 1] if 1 <= jp <= len(slots) else ""
+    else:
+        slots = ["13:00 - 13:40", "13:40 - 14:20", "14:20 - 15:00", "15:30 - 16:10", "16:10 - 16:50", "16:50 - 17:30"]
+        return slots[jp - 1] if 1 <= jp <= len(slots) else ""
 
-def get_break_time(day, shift):
-    """Mendapatkan jam istirahat sesuai dengan hari dan shift."""
+def get_break_time(day, shift, conn=None):
+    """Mendapatkan jam istirahat sesuai dengan hari dan shift dari database/fallback."""
+    if conn:
+        try:
+            cur = conn.cursor()
+            cur.execute(
+                "SELECT jam_mulai, jam_selesai FROM time_slots "
+                "WHERE hari = %s AND shift = %s AND tipe_slot = 'ISTIRAHAT' LIMIT 1",
+                (day.upper(), shift.upper())
+            )
+            row = cur.fetchone()
+            cur.close()
+            if row:
+                return f"{row['jam_mulai']} - {row['jam_selesai']}"
+        except Exception:
+            pass
+
     if shift == "PAGI":
         if day == "SENIN":
             return "09:30 - 10:00"
         elif day == "JUMAT":
-            return "09:40 - 10:00"
+            return "09:40 - 10:10"
         else:
             return "10:00 - 10:30"
-    else: # SIANG
+    else:
         if day == "JUMAT":
             return "15:40 - 16:00"
         else:
@@ -157,7 +136,9 @@ def generate_excel_timetable() -> tuple[io.BytesIO, str]:
     finally:
         conn.close()
 
-    school_name = "SMK 11 MARET"
+    from backend.database import get_branch_name
+    branch_name = get_branch_name().upper()
+    school_name = f"SMK 11 MARET {branch_name}"
     school_year = f"{datetime.now().getFullYear() if hasattr(datetime.now(), 'getFullYear') else datetime.now().year} - {(datetime.now().getFullYear() if hasattr(datetime.now(), 'getFullYear') else datetime.now().year) + 1}"
 
     wb = openpyxl.Workbook()
@@ -830,7 +811,7 @@ def generate_excel_timetable() -> tuple[io.BytesIO, str]:
     wb.save(buf)
     buf.seek(0)
     
-    clean_school_name = "".join(c for c in school_name if c.isalnum() or c in (" ", "_", "-")).strip().replace(" ", "_")
-    filename = f"Jadwal_{clean_school_name}_{datetime.now().strftime('%Y-%m-%d')}.xlsx"
+    branch_name = get_branch_name().upper()
+    filename = f"Jadwal_SMK_11_MARET_{branch_name}_{datetime.now().strftime('%Y-%m-%d')}.xlsx"
     
     return buf, filename

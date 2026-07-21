@@ -378,6 +378,6 @@ Dashboard akan menampilkan visualisasi log status setelah proses selesai, termas
 4.  **Menjalankan Aplikasi**:
     *   Gunakan berkas script `run.bat` di direktori utama, atau jalankan command:
         ```bash
-        py -m backend.main
+        python -m backend.main
         ```
     *   Buka browser di alamat `http://localhost:8000`.

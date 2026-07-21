@@ -15,11 +15,14 @@ const PAGES = {
   "pg-dashboard": { title: "Dashboard",            desc: "Ringkasan sistem jadwal Anda." },
   "pg-timetable": { title: "Grid Jadwal",           desc: "Visualisasi jadwal pelajaran per kelas." },
   "pg-master":    { title: "Data Master",           desc: "Kelola data guru, kelas, mapel, alokasi, dan penugasan." },
-  "pg-settings":  { title: "Pengaturan",            desc: "Konfigurasi Google Sheets API." },
+  "pg-time-slots":{ title: "Pengaturan Jam (Waktu)",desc: "Konfigurasi alokasi waktu Jam Pelajaran (JP), Istirahat, dan Upacara per hari dan shift." },
+  "pg-settings":  { title: "Pengaturan",            desc: "Konfigurasi Google Sheets API & Aturan Batas JP." },
   "pg-report":    { title: "Laporan Guru",          desc: "Jadwal mengajar dan sebaran JP untuk setiap guru." },
   "pg-alloc":     { title: "Ringkasan Alokasi",     desc: "Ringkasan alokasi mengajar semua guru." },
   "pg-feasibility": { title: "Peta Kelayakan Data",   desc: "Analisis kelayakan ketersediaan guru harian dan kapasitas beban mata pelajaran." },
+  "pg-ketersediaan-hari": { title: "Ketersediaan Hari", desc: "Kelola ketersediaan hari mengajar guru untuk shift Pagi dan Shift Siang." },
   "pg-guru-mutlak": { title: "Daftar Guru Mutlak",  desc: "Kelola penguncian guru ke kelas dan mata pelajaran secara mutlak." },
+  "pg-guru-4jp":  { title: "Guru ≥4 JP per Kelas", desc: "Daftar guru yang mengajar 4 Jam Pelajaran (JP) atau lebih di satu kelas tertentu pada hari yang sama." },
 };
 
 /* ─────────────────────────────────────────────
@@ -35,6 +38,8 @@ let state = {
   timetable:   [],
   ttClasses:   [],
   ttStats:     {},
+  teacherSortBy: "nama",
+  teacherSortDir: "asc",
 };
 
 /* ─────────────────────────────────────────────
@@ -51,6 +56,54 @@ function log(msg, type = "info") {
   const ts  = new Date().toLocaleTimeString("id-ID");
   el.innerHTML += `<div class="${cls}">[${ts}] ${esc(msg)}</div>`;
   el.scrollTop = el.scrollHeight;
+}
+
+function showToast(message, type = "success") {
+  let container = $("toast-container");
+  if (!container) {
+    container = document.createElement("div");
+    container.id = "toast-container";
+    container.style.cssText = "position: fixed; top: 24px; right: 24px; z-index: 99999; display: flex; flex-direction: column; gap: 10px; pointer-events: none;";
+    document.body.appendChild(container);
+  }
+
+  const toast = document.createElement("div");
+  const isSuccess = type === "success" || type === "ok";
+  const bgColor = isSuccess ? "rgba(16, 185, 129, 0.95)" : "rgba(239, 68, 68, 0.95)";
+  const icon = isSuccess ? '<i class="fa-solid fa-circle-check"></i>' : '<i class="fa-solid fa-triangle-exclamation"></i>';
+
+  toast.style.cssText = `
+    pointer-events: auto;
+    background: ${bgColor};
+    color: #ffffff;
+    padding: 12px 18px;
+    border-radius: 8px;
+    font-size: 0.9rem;
+    font-weight: 600;
+    box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.3), 0 8px 10px -6px rgba(0, 0, 0, 0.3);
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    opacity: 0;
+    transform: translateY(-15px) scale(0.95);
+    transition: all 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+  `;
+  toast.innerHTML = `${icon} <span>${esc(message)}</span>`;
+
+  container.appendChild(toast);
+
+  requestAnimationFrame(() => {
+    toast.style.opacity = "1";
+    toast.style.transform = "translateY(0) scale(1)";
+  });
+
+  setTimeout(() => {
+    toast.style.opacity = "0";
+    toast.style.transform = "translateY(-10px) scale(0.95)";
+    setTimeout(() => {
+      if (toast.parentElement) toast.parentElement.removeChild(toast);
+    }, 300);
+  }, 3500);
 }
 
 function showOverlay(msg = "Memproses...", showAbort = false) {
@@ -72,28 +125,28 @@ function hideOverlay() {
 }
 
 async function api(method, path, body) {
-  const branch = localStorage.getItem("active_branch") || "bekasi";
   const opts = { 
     method, 
     headers: { 
-      "Content-Type": "application/json",
-      "X-Branch": branch
+      "Content-Type": "application/json"
     } 
   };
   if (body !== undefined) opts.body = JSON.stringify(body);
   const res = await fetch(path, opts);
   const data = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(data.detail || data.message || `HTTP ${res.status}`);
+  if (!res.ok) {
+    let msg = data.detail || data.message || `HTTP ${res.status}`;
+    if (typeof msg === "object") {
+      msg = Array.isArray(msg) ? msg.map(m => m.msg || JSON.stringify(m)).join("; ") : JSON.stringify(msg);
+    }
+    throw new Error(msg);
+  }
   return data;
 }
 
 async function apiUpload(path, formData) {
-  const branch = localStorage.getItem("active_branch") || "bekasi";
   const res = await fetch(path, {
     method: "POST",
-    headers: {
-      "X-Branch": branch
-    },
     body: formData
   });
   const data = await res.json().catch(() => ({}));
@@ -156,51 +209,7 @@ if (btnFullscreen) {
   });
 }
 
-/* ─────────────────────────────────────────────
-   Branch Switcher
-   ───────────────────────────────────────────── */
 
-function updateBranchUI() {
-  const branch = localStorage.getItem("active_branch") || "bekasi";
-  const label = $("active-branch-label");
-  if (label) {
-    label.textContent = branch.charAt(0).toUpperCase() + branch.slice(1);
-  }
-}
-
-$("btn-branch-switch")?.addEventListener("click", async () => {
-  const currentBranch = localStorage.getItem("active_branch") || "bekasi";
-  const newBranch = currentBranch === "bekasi" ? "jakarta" : "bekasi";
-  
-  if (!confirm(`Pindah ke cabang ${newBranch.toUpperCase()}? Halaman akan memuat data baru.`)) {
-    return;
-  }
-  
-  localStorage.setItem("active_branch", newBranch);
-  updateBranchUI();
-  
-  const consoleEl = $("console");
-  if (consoleEl) {
-    consoleEl.innerHTML = `<div class="log-sys">[SYSTEM] Pindah ke cabang ${newBranch.toUpperCase()}. Memuat ulang data...</div>`;
-  }
-  
-  showOverlay("Memuat data cabang " + newBranch.toUpperCase() + "...");
-  try {
-    await refreshAllData();
-    const activeNav = document.querySelector(".nav-item.on");
-    const activePg = activeNav ? activeNav.dataset.page : "pg-dashboard";
-    if (activePg === "pg-dashboard") {
-      await loadStats();
-    }
-    log(`Berhasil berpindah ke cabang ${newBranch.toUpperCase()}.`, "ok");
-  } catch (e) {
-    log("Gagal memuat data cabang baru: " + e.message, "err");
-  } finally {
-    hideOverlay();
-  }
-});
-
-updateBranchUI();
 
 /* ─────────────────────────────────────────────
    Navigation
@@ -222,7 +231,11 @@ document.querySelectorAll(".nav-item[data-page]").forEach(btn => {
     if (pg === "pg-report")    renderReport();
     if (pg === "pg-alloc")     renderGlobalAllocationReport();
     if (pg === "pg-feasibility") loadFeasibility();
+    if (pg === "pg-ketersediaan-hari") loadAvailabilityTable();
     if (pg === "pg-guru-mutlak") loadGuruMutlakRowspanTab();
+    if (pg === "pg-guru-4jp")    renderGuru4JPTable();
+    if (pg === "pg-time-slots")  loadTimeSlots();
+    if (pg === "pg-settings")    loadJpLimits();
   });
 });
 
@@ -245,7 +258,20 @@ document.querySelectorAll(".sub-btn[data-sub]").forEach(btn => {
    Dashboard Stats
    ───────────────────────────────────────────── */
 
+async function loadAppInfo() {
+  try {
+    const info = await api("GET", "/api/info");
+    const label = $("active-db-label");
+    if (label && info && info.branch_name) {
+      label.textContent = info.branch_name;
+    }
+  } catch (e) {
+    console.warn("Gagal memuat info database:", e);
+  }
+}
+
 async function loadStats() {
+  loadAppInfo();
   try {
     const [s, h] = await Promise.all([
       api("GET", "/api/stats"),
@@ -631,6 +657,7 @@ async function loadTeachers() {
       api("GET", "/api/teachers"),
       api("GET", "/api/teacher-subjects"),
     ]);
+    initAvailDrafts();
     renderTeachersTable();
     populateTeacherDropdowns();
   } catch (e) {
@@ -653,6 +680,41 @@ function renderTeachersTable() {
   }
   empty.style.display = "none";
 
+  // Sort teachers based on state.teacherSortBy and state.teacherSortDir
+  const sortedTeachers = [...state.teachers];
+  const isAsc = state.teacherSortDir === "asc";
+  if (state.teacherSortBy === "kode") {
+    sortedTeachers.sort((a, b) => {
+      const codeA = parseInt(a.kode_guru) || 0;
+      const codeB = parseInt(b.kode_guru) || 0;
+      return isAsc ? (codeA - codeB) : (codeB - codeA);
+    });
+  } else {
+    // default: name ascending
+    sortedTeachers.sort((a, b) => {
+      const nameA = (a.nama_guru || "").toLowerCase();
+      const nameB = (b.nama_guru || "").toLowerCase();
+      return isAsc ? nameA.localeCompare(nameB) : nameB.localeCompare(nameA);
+    });
+  }
+
+  // Update header sort icons
+  const iconKode = $("icon-sort-kode");
+  const iconNama = $("icon-sort-nama");
+  if (iconKode && iconNama) {
+    if (state.teacherSortBy === "kode") {
+      iconKode.className = isAsc ? "fa-solid fa-sort-up" : "fa-solid fa-sort-down";
+      iconKode.style.opacity = "0.9";
+      iconNama.className = "fa-solid fa-sort";
+      iconNama.style.opacity = "0.5";
+    } else {
+      iconNama.className = isAsc ? "fa-solid fa-sort-up" : "fa-solid fa-sort-down";
+      iconNama.style.opacity = "0.9";
+      iconKode.className = "fa-solid fa-sort";
+      iconKode.style.opacity = "0.5";
+    }
+  }
+
   // Build teacher-subject map
   const tsMap = {};
   (state.teacherSubjects || []).forEach(ts => {
@@ -660,7 +722,7 @@ function renderTeachersTable() {
     tsMap[ts.id_guru].push(ts.nama_mapel);
   });
 
-  tbody.innerHTML = state.teachers.map(t => {
+  tbody.innerHTML = sortedTeachers.map(t => {
     const shift = [t.shift_pagi && "Pagi", t.shift_siang && "Siang"].filter(Boolean).join(" + ") || "-";
     const mapels = tsMap[t.id_guru] || [];
     const mapelPreview = mapels.length
@@ -850,8 +912,11 @@ function editGuru(id) {
   $("eg-min-jp").value = t.min_jp ?? 2;
   $("eg-max-jp").value = t.max_jp ?? 60;
   $("eg-wa").value   = t.no_wa || "";
-  setCheckedDays("eg-days-pagi",  t.hari_tersedia_pagi  || []);
-  setCheckedDays("eg-days-siang", t.hari_tersedia_siang || []);
+  const draft = availTeacherDrafts[id];
+  const pagiDays = draft ? draft.hari_pagi : (t.hari_tersedia_pagi || []);
+  const siangDays = draft ? draft.hari_siang : (t.hari_tersedia_siang || []);
+  setCheckedDays("eg-days-pagi",  pagiDays);
+  setCheckedDays("eg-days-siang", siangDays);
 
   // Initialize temporary state for JP restrictions
   state.currentTeacherJPRestrictions = {
@@ -910,14 +975,27 @@ $("form-edit-guru").addEventListener("submit", async e => {
   } finally { hideOverlay(); }
 });
 
-function openTeacherJPRestrictionModal(id) {
+function openTeacherJPRestrictionModal(id, directSave = false) {
   const t = state.teachers.find(x => x.id_guru === id);
   if (!t) return;
 
+  state.editingJPRestrictionTeacherId = id;
+  state.isJPRestrictionDirectSave = directSave;
+
   $("tjr-nama-guru").textContent = t.nama_guru;
 
-  const activeDaysPagi = getCheckedDays("eg-days-pagi");
-  const activeDaysSiang = getCheckedDays("eg-days-siang");
+  // State batasan jam sementara
+  state.currentTeacherJPRestrictions = {
+    pagi: t.allowed_jp_pagi ? JSON.parse(JSON.stringify(t.allowed_jp_pagi)) : null,
+    siang: t.allowed_jp_siang ? JSON.parse(JSON.stringify(t.allowed_jp_siang)) : null
+  };
+
+  const activeDaysPagi = getCheckedDays("eg-days-pagi").length > 0
+    ? getCheckedDays("eg-days-pagi")
+    : (t.hari_tersedia_pagi && t.hari_tersedia_pagi.length > 0 ? t.hari_tersedia_pagi : (t.hari_tersedia || ["SENIN","SELASA","RABU","KAMIS","JUMAT","SABTU"]));
+  const activeDaysSiang = getCheckedDays("eg-days-siang").length > 0
+    ? getCheckedDays("eg-days-siang")
+    : (t.hari_tersedia_siang && t.hari_tersedia_siang.length > 0 ? t.hari_tersedia_siang : (t.hari_tersedia || ["SENIN","SELASA","RABU","KAMIS","JUMAT","SABTU"]));
 
   const pagiPanel = $("tjr-pagi-panel");
   const siangPanel = $("tjr-siang-panel");
@@ -987,8 +1065,8 @@ $("tjr-btn-select-all-siang").addEventListener("click", () => {
   document.querySelectorAll("#tjr-siang-grid input[type=checkbox]").forEach(cb => cb.checked = true);
 });
 
-// Save constraints temporarily to local state
-$("modal-tjr-save").addEventListener("click", () => {
+// Save constraints temporarily or directly to DB
+$("modal-tjr-save").addEventListener("click", async () => {
   const pagiRows = document.querySelectorAll("#tjr-pagi-grid tr");
   let hasPagiRest = false;
   const pagiRestrictions = {};
@@ -1019,13 +1097,40 @@ $("modal-tjr-save").addEventListener("click", () => {
     }
   });
 
+  const pagiResult = hasPagiRest ? pagiRestrictions : null;
+  const siangResult = hasSiangRest ? siangRestrictions : null;
+
   state.currentTeacherJPRestrictions = {
-    pagi: hasPagiRest ? pagiRestrictions : null,
-    siang: hasSiangRest ? siangRestrictions : null
+    pagi: pagiResult,
+    siang: siangResult
   };
 
   $("modal-teacher-jp-restriction").style.display = "none";
-  log("Batasan JP disimpan sementara. Klik 'Simpan' pada form guru untuk menyimpan permanen.", "warn");
+
+  if (state.isJPRestrictionDirectSave && state.editingJPRestrictionTeacherId) {
+    const tid = state.editingJPRestrictionTeacherId;
+    const teacher = state.teachers.find(x => x.id_guru === tid);
+    if (teacher) {
+      const body = {
+        ...teacher,
+        allowed_jp_pagi: pagiResult,
+        allowed_jp_siang: siangResult
+      };
+      showOverlay("Menyimpan rincian batasan jam mengajar...");
+      try {
+        await api("PUT", `/api/teachers/${tid}`, body);
+        await loadTeachers();
+        renderAvailabilityTable();
+        log(`Berhasil menyimpan rincian batasan jam mengajar untuk Guru [${teacher.nama_guru}].`, "ok");
+      } catch (err) {
+        log("Gagal menyimpan batasan jam: " + err.message, "err");
+      } finally {
+        hideOverlay();
+      }
+    }
+  } else {
+    log("Batasan JP disimpan sementara. Klik 'Simpan' pada form guru untuk menyimpan permanen.", "warn");
+  }
 });
 
 /* ─────────────────────────────────────────────
@@ -2004,6 +2109,7 @@ async function loadTimetable() {
     state.ttStats   = data.stats     || {};
     renderTimetable();
     renderReport();
+    renderGuru4JPTable();
     checkAndShowIdleTeachers();
     if (state.ttStats.fill_percentage !== undefined) {
       log(`Jadwal tersimpan: ${state.ttStats.fill_percentage}% terisi, ${state.ttStats.total_slots} slot.`, "info");
@@ -2440,6 +2546,26 @@ $("btn-add-kelas-trigger")?.addEventListener("click", () => showAddModal("kelas"
 $("btn-add-mapel-trigger")?.addEventListener("click", () => showAddModal("mapel"));
 $("btn-add-alokasi-trigger")?.addEventListener("click", () => showAddModal("alokasi"));
 
+// Bind sort headers for Guru list
+$("th-guru-kode")?.addEventListener("click", () => {
+  if (state.teacherSortBy === "kode") {
+    state.teacherSortDir = state.teacherSortDir === "asc" ? "desc" : "asc";
+  } else {
+    state.teacherSortBy = "kode";
+    state.teacherSortDir = "asc";
+  }
+  renderTeachersTable();
+});
+$("th-guru-nama")?.addEventListener("click", () => {
+  if (state.teacherSortBy === "nama") {
+    state.teacherSortDir = state.teacherSortDir === "asc" ? "desc" : "asc";
+  } else {
+    state.teacherSortBy = "nama";
+    state.teacherSortDir = "asc";
+  }
+  renderTeachersTable();
+});
+
 $("btn-copy-alokasi-trigger")?.addEventListener("click", () => {
   // Pre-fill target class if the user is currently filtering allocations by a class
   const filterVal = $("filter-alokasi-kelas")?.value;
@@ -2576,41 +2702,170 @@ $("form-edit-alokasi").addEventListener("submit", async e => {
    ───────────────────────────────────────────── */
 
 async function loadSettings() {
-  try {
-    const s = await api("GET", "/api/settings");
-    if ($("cfg-sid"))   $("cfg-sid").value   = s.spreadsheet_id   || "";
-    if ($("cfg-creds")) $("cfg-creds").value = s.credentials_json || "";
-    if ($("cfg-lms-url")) $("cfg-lms-url").value = s.lms_api_url || "";
-    if ($("cfg-lms-key")) $("cfg-lms-key").value = s.lms_api_key || "";
-  } catch {}
+  // Google Sheets settings disabled
 }
 
-$("form-settings")?.addEventListener("submit", async e => {
-  e.preventDefault();
-  const body = {
-    spreadsheet_id:   $("cfg-sid").value.trim(),
-    credentials_json: $("cfg-creds").value.trim(),
-    lms_api_url:      $("cfg-lms-url") ? $("cfg-lms-url").value.trim() : "",
-    lms_api_key:      $("cfg-lms-key") ? $("cfg-lms-key").value.trim() : "",
-  };
+/* ─────────────────────────────────────────────
+   LMS ENDPOINTS — CRUD
+   ───────────────────────────────────────────── */
+
+let lmsEndpoints = [];
+
+async function loadLmsEndpoints() {
   try {
-    showOverlay("Menyimpan pengaturan...");
-    await api("POST", "/api/settings", body);
-    log("Pengaturan berhasil disimpan!", "ok");
+    lmsEndpoints = await api("GET", "/api/lms-endpoints");
+    renderLmsEndpointsTable();
+    updateSyncLmsActiveLabel();
   } catch (err) {
-    log("Gagal simpan pengaturan: " + err.message, "err");
+    log("Gagal memuat daftar LMS endpoint: " + err.message, "err");
+  }
+}
+
+function renderLmsEndpointsTable() {
+  const tbody = $("lms-endpoints-tbody");
+  if (!tbody) return;
+
+  if (!lmsEndpoints || lmsEndpoints.length === 0) {
+    tbody.innerHTML = `<tr><td colspan="5" style="text-align:center;padding:20px;color:var(--muted);font-style:italic">
+      <i class="fa-solid fa-plug" style="margin-right:6px"></i>Belum ada endpoint. Klik "+ Tambah Endpoint" untuk menambahkan.
+    </td></tr>`;
+    return;
+  }
+
+  tbody.innerHTML = lmsEndpoints.map(ep => {
+    const activeLabel = ep.is_active
+      ? `<span style="display:inline-flex;align-items:center;gap:5px;padding:3px 10px;border-radius:20px;font-size:.72rem;font-weight:700;background:rgba(34,197,94,.15);color:#22c55e;border:1px solid rgba(34,197,94,.3)">
+           <span style="width:6px;height:6px;border-radius:50%;background:#22c55e;animation:pulse 1.5s infinite"></span>AKTIF
+         </span>`
+      : `<button onclick="setLmsActive(${ep.id})" style="padding:3px 10px;border-radius:20px;font-size:.72rem;font-weight:700;background:rgba(255,255,255,.05);color:var(--muted);border:1px solid rgba(255,255,255,.1);cursor:pointer;transition:all .2s" onmouseover="this.style.background='rgba(99,102,241,.2)';this.style.color='#818cf8'" onmouseout="this.style.background='rgba(255,255,255,.05)';this.style.color='var(--muted)'">Pilih Aktif</button>`;
+    return `<tr style="${ep.is_active ? 'border-left:3px solid #22c55e;background:rgba(34,197,94,.04)' : 'border-left:3px solid transparent'}">
+      <td style="padding:10px 14px">
+        <div style="font-weight:700;color:var(--text)">${esc(ep.nama_label)}</div>
+        <div style="font-size:.72rem;color:var(--muted)">${ep.keterangan ? esc(ep.keterangan) : '—'}</div>
+      </td>
+      <td style="padding:10px 14px;font-family:'JetBrains Mono',monospace;font-size:.75rem;color:var(--text-muted);word-break:break-all">${esc(ep.endpoint_url)}</td>
+      <td style="padding:10px 14px;font-family:'JetBrains Mono',monospace;font-size:.75rem;color:var(--muted)">${esc(ep.bearer_token_preview || '—')}</td>
+      <td style="padding:10px 14px;text-align:center">${activeLabel}</td>
+      <td style="padding:10px 14px;text-align:right">
+        <div style="display:flex;gap:6px;justify-content:flex-end">
+          <button onclick="openEditLmsModal(${ep.id})" style="padding:5px 10px;border-radius:8px;font-size:.75rem;background:rgba(245,158,11,.1);color:#f59e0b;border:1px solid rgba(245,158,11,.25);cursor:pointer;transition:all .2s" title="Edit"><i class="fa-solid fa-pen"></i></button>
+          <button onclick="deleteLmsEndpoint(${ep.id}, '${esc(ep.nama_label)}'" ${ep.is_active ? 'disabled title="Nonaktifkan dulu sebelum hapus"' : 'title="Hapus"'} style="padding:5px 10px;border-radius:8px;font-size:.75rem;background:rgba(239,68,68,.1);color:#ef4444;border:1px solid rgba(239,68,68,.25);cursor:pointer;transition:all .2s;${ep.is_active ? 'opacity:.35;cursor:not-allowed' : ''}"><i class="fa-solid fa-trash"></i></button>
+        </div>
+      </td>
+    </tr>`;
+  }).join("");
+}
+
+function updateSyncLmsActiveLabel() {
+  const active = lmsEndpoints.find(e => e.is_active);
+  const labelEl = $("lms-active-label");
+  if (labelEl) {
+    if (active) {
+      labelEl.innerHTML = `<i class="fa-solid fa-circle" style="color:#22c55e;font-size:.6rem"></i> <strong style="color:#22c55e">${esc(active.nama_label)}</strong> <span style="color:var(--muted);font-size:.75rem;font-family:monospace">${esc(active.endpoint_url)}</span>`;
+    } else {
+      labelEl.innerHTML = `<i class="fa-solid fa-circle-exclamation" style="color:var(--warn)"></i> <span style="color:var(--muted)">Belum ada endpoint aktif</span>`;
+    }
+  }
+}
+
+// Buka modal tambah
+$("btn-add-lms-endpoint")?.addEventListener("click", () => {
+  $("lms-ep-modal-title").textContent = "➕ Tambah Endpoint LMS";
+  $("lms-ep-id").value       = "";
+  $("lms-ep-label").value    = "";
+  $("lms-ep-url").value      = "";
+  $("lms-ep-token").value    = "";
+  $("lms-ep-ket").value      = "";
+  $("lms-ep-token-hint").style.display = "none";
+  $("modal-lms-endpoint").style.display = "flex";
+});
+
+// Buka modal edit
+function openEditLmsModal(id) {
+  const ep = lmsEndpoints.find(e => e.id === id);
+  if (!ep) return;
+  $("lms-ep-modal-title").textContent = "✏️ Edit Endpoint LMS";
+  $("lms-ep-id").value       = ep.id;
+  $("lms-ep-label").value    = ep.nama_label;
+  $("lms-ep-url").value      = ep.endpoint_url;
+  $("lms-ep-token").value    = "";
+  $("lms-ep-ket").value      = ep.keterangan || "";
+  $("lms-ep-token-hint").style.display = "block";
+  $("modal-lms-endpoint").style.display = "flex";
+}
+
+// Tutup modal
+$("btn-lms-ep-cancel")?.addEventListener("click", () => {
+  $("modal-lms-endpoint").style.display = "none";
+});
+$("btn-lms-ep-close")?.addEventListener("click", () => {
+  $("modal-lms-endpoint").style.display = "none";
+});
+
+// Submit form tambah/edit
+$("form-lms-endpoint")?.addEventListener("submit", async e => {
+  e.preventDefault();
+  const id    = $("lms-ep-id").value;
+  const body  = {
+    nama_label:   $("lms-ep-label").value.trim(),
+    endpoint_url: $("lms-ep-url").value.trim(),
+    bearer_token: $("lms-ep-token").value.trim(),
+    keterangan:   $("lms-ep-ket").value.trim(),
+  };
+  if (!body.nama_label || !body.endpoint_url) {
+    alert("Nama Label dan URL Endpoint wajib diisi!"); return;
+  }
+  try {
+    showOverlay("Menyimpan endpoint...");
+    if (id) {
+      await api("PUT", `/api/lms-endpoints/${id}`, body);
+      log(`Endpoint '${body.nama_label}' berhasil diperbarui.`, "ok");
+    } else {
+      if (!body.bearer_token) { alert("Bearer Token wajib diisi!"); return; }
+      await api("POST", "/api/lms-endpoints", body);
+      log(`Endpoint '${body.nama_label}' berhasil ditambahkan.`, "ok");
+    }
+    $("modal-lms-endpoint").style.display = "none";
+    await loadLmsEndpoints();
+  } catch (err) {
+    log("Gagal simpan endpoint: " + err.message, "err");
+    alert("Gagal: " + err.message);
   } finally { hideOverlay(); }
 });
 
+// Set aktif
+async function setLmsActive(id) {
+  try {
+    showOverlay("Mengubah endpoint aktif...");
+    await api("POST", `/api/lms-endpoints/${id}/set-active`);
+    await loadLmsEndpoints();
+    log("Endpoint aktif berhasil diperbarui.", "ok");
+  } catch (err) {
+    log("Gagal: " + err.message, "err");
+  } finally { hideOverlay(); }
+}
+
+// Hapus endpoint
+async function deleteLmsEndpoint(id, nama) {
+  if (!confirm(`Hapus endpoint "${nama}"? Tindakan ini tidak bisa dibatalkan.`)) return;
+  try {
+    showOverlay("Menghapus endpoint...");
+    await api("DELETE", `/api/lms-endpoints/${id}`);
+    await loadLmsEndpoints();
+    log(`Endpoint '${nama}' berhasil dihapus.`, "ok");
+  } catch (err) {
+    log("Gagal hapus endpoint: " + err.message, "err");
+  } finally { hideOverlay(); }
+}
+
 async function syncToLMS() {
-  const lmsUrl = $("cfg-lms-url")?.value.trim();
-  const lmsKey = $("cfg-lms-key")?.value.trim();
-  if (!lmsUrl || !lmsKey) {
-    alert("Silakan isi dan simpan LMS API URL Endpoint serta Bearer Token terlebih dahulu di menu Pengaturan!");
+  const active = lmsEndpoints.find(e => e.is_active);
+  if (!active) {
+    alert("Belum ada endpoint LMS yang aktif!\nTambahkan endpoint dan klik 'Pilih Aktif' terlebih dahulu.");
     return;
   }
-  if (!confirm("Kirim seluruh data master dan jadwal saat ini ke server LMS Laravel?")) return;
-  
+  if (!confirm(`Kirim seluruh data master dan jadwal ke:\n"${active.nama_label}" (${active.endpoint_url})?`)) return;
+
   try {
     showOverlay("Mengirim data ke LMS...");
     const res = await api("POST", "/api/sync/lms");
@@ -3062,7 +3317,8 @@ async function downloadTimetableExcel() {
   }
   showOverlay("Mengunduh Excel Jadwal...");
   try {
-    window.location.href = "/api/timetable/download";
+    const activeBranch = localStorage.getItem("active_branch") || "bekasi";
+    window.location.href = `/api/timetable/download?branch=${encodeURIComponent(activeBranch)}`;
     log("File Excel berhasil diunduh.", "ok");
   } catch (err) {
     log("Gagal mengunduh Excel: " + err.message, "err");
@@ -3315,23 +3571,66 @@ function renderGMDetailList() {
   const id_guru = currentGMTeacherId;
   const locked = (state.allocations || []).filter(a => a.id_guru_mutlak === id_guru);
 
+  // Helper to look up class shift operasional
+  const getClassShift = (id_kelas) => {
+    const cls = (state.classes || []).find(c => c.id_kelas === id_kelas);
+    return cls ? cls.shift_operasional : "PAGI";
+  };
+
+  // Calculate morning and afternoon JP
+  const pagiJP = locked
+    .filter(a => getClassShift(a.id_kelas) === "PAGI")
+    .reduce((sum, a) => sum + (a.durasi_jp || 0), 0);
+    
+  const siangJP = locked
+    .filter(a => getClassShift(a.id_kelas) === "SIANG")
+    .reduce((sum, a) => sum + (a.durasi_jp || 0), 0);
+    
+  const totalJP = pagiJP + siangJP;
+
+  const pagiJPEl = $("lbl-gm-pagi-jp");
+  if (pagiJPEl) pagiJPEl.textContent = pagiJP;
+
+  const siangJPEl = $("lbl-gm-siang-jp");
+  if (siangJPEl) siangJPEl.textContent = siangJP;
+
+  const totalJPEl = $("lbl-gm-total-jp");
+  if (totalJPEl) totalJPEl.textContent = totalJP;
+
   if (!locked.length) {
     tbody.innerHTML = `<tr><td colspan="4" style="text-align:center;color:var(--muted);font-style:italic">Belum ada kelas yang dikunci untuk guru ini.</td></tr>`;
     return;
   }
 
-  tbody.innerHTML = locked.map(a => `
-    <tr>
-      <td><strong>${esc(a.nama_kelas)}</strong></td>
-      <td>${esc(a.nama_mapel)}</td>
-      <td><strong>${a.durasi_jp}</strong> JP</td>
-      <td style="text-align:right">
-        <button type="button" class="btn btn-sm btn-danger" onclick="deleteGuruMutlakFromDetail(${a.id_class_subject})" style="padding: 3px 7px;">
-          <i class="fa-solid fa-trash"></i>
-        </button>
-      </td>
-    </tr>
-  `).join("");
+  // Sort locked allocations: PAGI first, then SIANG. Secondary sort by nama_kelas.
+  locked.sort((x, y) => {
+    const shiftX = getClassShift(x.id_kelas);
+    const shiftY = getClassShift(y.id_kelas);
+    if (shiftX !== shiftY) {
+      return shiftX === "PAGI" ? -1 : 1;
+    }
+    return x.nama_kelas.localeCompare(y.nama_kelas);
+  });
+
+  tbody.innerHTML = locked.map(a => {
+    const shift = getClassShift(a.id_kelas);
+    const borderStyle = shift === "PAGI" 
+      ? "border-left: 3px solid rgba(99,102,241,.6);" 
+      : "border-left: 3px solid rgba(56,189,248,.6);";
+      
+    return `
+      <tr style="${borderStyle}">
+        <td><strong>${esc(a.nama_kelas)}</strong> ${badgeShift(shift)}</td>
+        <td>${esc(a.nama_mapel)}</td>
+        <td><strong>${a.durasi_jp}</strong> JP</td>
+        <td style="text-align:right">
+          <button type="button" class="btn btn-sm btn-danger" onclick="deleteGuruMutlakFromDetail(${a.id_class_subject})" style="padding: 3px 7px;">
+            <i class="fa-solid fa-trash"></i>
+          </button>
+        </td>
+      </tr>
+    `;
+  }).join("");
 }
 
 // Mapel change listener inside sub-modal
@@ -3464,6 +3763,8 @@ async function refreshAllData() {
     state.teacherSubjects = teacherSubjects || [];
     state.allocations = allocations || [];
 
+    initAvailDrafts();
+
     renderTeachersTable();
     renderClassesTable();
     renderSubjectsTable();
@@ -3488,8 +3789,9 @@ async function loadFeasibility() {
     const data = await api("GET", "/api/feasibility");
     feasibilityData = data;
     
-    renderFeasibilityGrid(data.daily_coverage);
-    renderFeasibilityMapel(data.subject_capacities);
+    renderFeasibilityGrid(data.daily_coverage || []);
+    renderFeasibilityRecommendations(data.recommendations || []);
+    renderFeasibilityMapel(data.subject_capacities || []);
     
     // Reset detail view
     $("feasibility-detail-empty").style.display = "block";
@@ -3499,6 +3801,47 @@ async function loadFeasibility() {
   } finally {
     hideOverlay();
   }
+}
+
+function renderFeasibilityRecommendations(recs) {
+  const panel = $("panel-feasibility-recommendations");
+  const list = $("feasibility-recommendations-list");
+  const countEl = $("feasibility-rec-count");
+  if (!panel || !list) return;
+
+  if (!recs || recs.length === 0) {
+    panel.style.display = "none";
+    return;
+  }
+
+  panel.style.display = "block";
+  if (countEl) countEl.textContent = `${recs.length} Rekomendasi / Saran Formasi`;
+
+  list.innerHTML = recs.map(r => {
+    let borderClr = "rgba(99,102,241,0.3)";
+    let bgClr     = "rgba(99,102,241,0.06)";
+    let iconClr   = "var(--primary-h)";
+    
+    if (r.severity === "DANGER") {
+      borderClr = "rgba(239,68,68,0.3)";
+      bgClr     = "rgba(239,68,68,0.06)";
+      iconClr   = "var(--danger)";
+    } else if (r.severity === "WARNING") {
+      borderClr = "rgba(245,158,11,0.3)";
+      bgClr     = "rgba(245,158,11,0.06)";
+      iconClr   = "var(--warn)";
+    }
+
+    return `
+      <div style="background:${bgClr}; border:1px solid ${borderClr}; border-radius:10px; padding:10px 14px; display:flex; align-items:flex-start; gap:12px;">
+        <i class="fa-solid ${r.icon || 'fa-lightbulb'}" style="font-size:1.1rem; color:${iconClr}; margin-top:2px;"></i>
+        <div>
+          <div style="font-weight:700; font-size:0.88rem; color:var(--text);">${esc(r.title)}</div>
+          <div style="font-size:0.82rem; color:var(--muted); margin-top:2px;">${esc(r.text)}</div>
+        </div>
+      </div>
+    `;
+  }).join("");
 }
 
 function renderFeasibilityGrid(dailyCoverage) {
@@ -3575,51 +3918,121 @@ function renderFeasibilityMapel(subjectCapacities) {
   const tbody = document.querySelector("#tbl-feasibility-mapel tbody");
   if (!tbody) return;
   
-  if (subjectCapacities.length === 0) {
-    tbody.innerHTML = `<tr><td colspan="6" class="text-muted" style="text-align:center;padding:20px;">Tidak ada analisis mapel aktif.</td></tr>`;
+  if (!subjectCapacities || subjectCapacities.length === 0) {
+    tbody.innerHTML = `<tr><td colspan="6" class="text-muted" style="text-align:center;padding:20px;">Tidak ada alokasi mata pelajaran aktif.</td></tr>`;
     return;
   }
   
   tbody.innerHTML = subjectCapacities.map(sc => {
-    let badgeCls = "b-umum";
-    let riskText = "Aman";
+    // Safe fallbacks to handle cached or missing fields
+    const clsPagi   = sc.kelas_pemakai_pagi  || [];
+    const clsSiang  = sc.kelas_pemakai_siang || [];
+    const clsAll    = sc.kelas_pemakai       || [];
+
+    const nPagi     = sc.n_kelas_pagi  ?? clsPagi.length;
+    const nSiang    = sc.n_kelas_siang ?? clsSiang.length;
+    const nTotal    = sc.n_kelas_total ?? (clsAll.length || (nPagi + nSiang));
+
+    let jpPagi  = sc.jp_pagi  ?? sc.total_jp_pagi  ?? 0;
+    let jpSiang = sc.jp_siang ?? sc.total_jp_siang ?? 0;
+    const totalJp = sc.total_jp_butuh ?? (jpPagi + jpSiang) ?? 0;
+
+    // Smart fallback if jpPagi and jpSiang are both 0 but totalJp > 0 and class breakdown exists
+    if (jpPagi === 0 && jpSiang === 0 && totalJp > 0 && nTotal > 0) {
+      if (nPagi > 0 && nSiang > 0) {
+        const avgPerClass = Math.round(totalJp / nTotal);
+        jpPagi = nPagi * avgPerClass;
+        jpSiang = Math.max(0, totalJp - jpPagi);
+      } else if (nPagi > 0) {
+        jpPagi = totalJp;
+        jpSiang = 0;
+      } else if (nSiang > 0) {
+        jpPagi = 0;
+        jpSiang = totalJp;
+      }
+    }
+
+    const capPagi   = sc.cap_pagi  ?? sc.total_jp_kapasitas ?? 0;
+    const capSiang  = sc.cap_siang ?? sc.total_jp_kapasitas ?? 0;
+    const capTotal  = sc.total_jp_kapasitas ?? 0;
+
+    let badgeStyle, riskText;
     if (sc.status === "RED") {
-      badgeCls = "btn-danger";
-      riskText = sc.n_guru === 0 ? "Kritis: Tidak Ada Guru" : "Kritis: Kurang JP";
+      badgeStyle = "background:rgba(239,68,68,0.18); color:var(--danger); border:1px solid rgba(239,68,68,0.3);";
+      riskText = (sc.n_guru === 0 || !sc.guru_pengampu || sc.guru_pengampu.length === 0) ? "Kritis: Tanpa Guru" : "Kritis: Kurang Jam";
     } else if (sc.status === "YELLOW") {
-      badgeCls = "btn-validate";
+      badgeStyle = "background:rgba(245,158,11,0.18); color:var(--warn); border:1px solid rgba(245,158,11,0.3);";
       riskText = "Rawan (> 85%)";
     } else {
-      badgeCls = "b-olahraga";
+      badgeStyle = "background:rgba(34,197,94,0.18); color:var(--success); border:1px solid rgba(34,197,94,0.3);";
       riskText = "Aman";
     }
     
-    const countText = `<span class="badge ${badgeCls}">${riskText}</span>`;
-    const kategori = badgeCat(sc.kategori_mapel);
+    const statusBadge = `<span class="badge" style="${badgeStyle}">${riskText}</span>`;
+    const kategori    = badgeCat(sc.kategori_mapel);
     
-    const gurusList = sc.guru_pengampu.length > 0 
-      ? sc.guru_pengampu.map(g => `<strong>${esc(g.nama_guru)}</strong> (Max ${g.max_jp} JP)`).join("<br>")
-      : `<span class="text-danger" style="font-style:italic;">Belum ada penugasan guru!</span>`;
+    // Format Guru List dengan status Shift Pagi / Siang
+    let gurusList = "";
+    if (sc.guru_pengampu && sc.guru_pengampu.length > 0) {
+      gurusList = sc.guru_pengampu.map(g => {
+        let shiftBadges = [];
+        if (g.shift_pagi)  shiftBadges.push(`<span style="color:var(--warn); font-weight:600;">Pagi</span>`);
+        if (g.shift_siang) shiftBadges.push(`<span style="color:var(--info); font-weight:600;">Siang</span>`);
+        const shiftsText = shiftBadges.length > 0 ? `[${shiftBadges.join("/")}]` : '[Off]';
+        return `<div><strong>${esc(g.nama_guru)}</strong> <span style="font-size:0.72rem; color:var(--muted);">${shiftsText} (${g.max_jp || 60} JP)</span></div>`;
+      }).join("");
+    } else {
+      gurusList = `<span class="text-danger" style="font-style:italic; font-size:0.78rem;"><i class="fa-solid fa-circle-exclamation"></i> Belum ada penugasan guru!</span>`;
+    }
       
-    const usedClasses = sc.kelas_pemakai.map(c => `<span class="mapel-chip" style="background:rgba(99,102,241,0.1); border-color:rgba(99,102,241,0.25); color:var(--primary-h);">${esc(c)}</span>`).join(" ");
+    // Format Kelas Pemakai Pagi vs Siang
+    let usedClassesPagi  = clsPagi.map(c => `<span class="mapel-chip" style="background:rgba(245,158,11,0.12); border-color:rgba(245,158,11,0.3); color:var(--warn); font-size:0.72rem;">☀️ ${esc(c)}</span>`).join(" ");
+    let usedClassesSiang = clsSiang.map(c => `<span class="mapel-chip" style="background:rgba(56,189,248,0.12); border-color:rgba(56,189,248,0.3); color:var(--info); font-size:0.72rem;">🌙 ${esc(c)}</span>`).join(" ");
 
     return `
       <tr>
         <td>
-          <strong>${esc(sc.nama_mapel)}</strong>
-          <div style="margin-top:4px;">${usedClasses}</div>
+          <div style="font-weight:700; font-size:0.9rem;">${esc(sc.nama_mapel)}</div>
+          <div style="margin-top:4px;">${kategori}</div>
         </td>
-        <td>${kategori}</td>
-        <td><strong>${sc.total_jp_butuh} JP</strong></td>
         <td>
-          <div style="font-size:0.78rem; line-height:1.4;">${gurusList}</div>
+          <div style="font-size:0.82rem; line-height:1.5;">
+            <div>☀️ Pagi: <strong>${jpPagi} JP</strong></div>
+            <div>🌙 Siang: <strong>${jpSiang} JP</strong></div>
+            <div style="border-top:1px dashed var(--border); margin-top:3px; padding-top:3px; font-weight:700; color:var(--primary-h);">
+              📊 Total: ${totalJp} JP
+            </div>
+          </div>
         </td>
-        <td><strong>${sc.total_jp_kapasitas} JP</strong></td>
-        <td>${countText}</td>
+        <td>
+          <div style="font-size:0.78rem; line-height:1.4;">
+            <div><strong>${nTotal} Kelas Total</strong> (${nPagi} Pagi, ${nSiang} Siang)</div>
+            <div style="margin-top:4px; display:flex; flex-wrap:wrap; gap:3px;">
+              ${usedClassesPagi} ${usedClassesSiang}
+            </div>
+          </div>
+        </td>
+        <td>
+          <div style="font-size:0.78rem; line-height:1.4;">
+            <div style="margin-bottom:3px; font-weight:600;">${sc.n_guru || (sc.guru_pengampu ? sc.guru_pengampu.length : 0)} Guru Qualified (Tab 5)</div>
+            ${gurusList}
+          </div>
+        </td>
+        <td>
+          <div style="font-size:0.8rem; line-height:1.4;">
+            <div>Pagi: <strong>${capPagi} JP</strong> vs ${jpPagi} JP</div>
+            <div>Siang: <strong>${capSiang} JP</strong> vs ${jpSiang} JP</div>
+            <div style="border-top:1px dashed var(--border); margin-top:3px; padding-top:3px; font-weight:700;">
+              Total: ${capTotal} JP
+            </div>
+          </div>
+        </td>
+        <td>${statusBadge}</td>
       </tr>
     `;
   }).join("");
 }
+
 
 /* ─────────────────────────────────────────────
    DAFTAR GURU MUTLAK ROWSPAN VIEW
@@ -3700,12 +4113,13 @@ function renderGuruMutlakRowspanTable() {
               <option value="">Mapel</option>
             </select>
           </td>
+          <td style="text-align: center; color: var(--muted);">-</td>
+          <td style="text-align: center; font-weight: bold;">0</td>
           <td style="text-align: center; white-space:nowrap;">
             <button class="btn-inline-action btn-inline-save" onclick="saveInlineGM(${t.id_guru}, this)" title="Simpan">✓</button>
             <button class="btn-inline-action btn-inline-cancel" onclick="cancelInlineGM(${t.id_guru}, this)" title="Batal">✗</button>
             <button class="btn-inline-action btn-inline-delete" onclick="cancelInlineGM(${t.id_guru}, this)" title="Bersihkan"><i class="fa-solid fa-trash-can" style="font-size:0.75rem"></i></button>
           </td>
-          <td style="text-align: center; font-weight: bold;">0</td>
         </tr>
       `;
     } else {
@@ -3717,12 +4131,9 @@ function renderGuruMutlakRowspanTable() {
         </button>
       `;
       const classBadge = `
-        <div style="display:inline-flex; align-items:center; gap:8px;">
-          <span class="badge b-siang" style="padding:4px 8px; border:1px solid rgba(56,189,248,.3); display:inline-flex; align-items:center; gap:5px;">
-            <i class="fa-solid fa-xmark text-muted cursor-pointer" onclick="deleteInstantGuruMutlak(${firstAlloc.id_class_subject})" style="font-size:0.7rem;"></i> ${esc(firstAlloc.nama_kelas)}
-          </span>
-          ${deleteBtn}
-        </div>
+        <span class="badge b-siang" style="padding:4px 8px; border:1px solid rgba(56,189,248,.3); display:inline-flex; align-items:center; gap:5px;">
+          ${esc(firstAlloc.nama_kelas)}
+        </span>
       `;
 
       html += `
@@ -3741,6 +4152,7 @@ function renderGuruMutlakRowspanTable() {
           <td class="detail-cell">${esc(firstAlloc.nama_mapel)}</td>
           <td class="detail-cell" style="text-align: center;"><strong>${firstAlloc.durasi_jp}</strong> JP</td>
           <td rowspan="${totalSpan}" style="text-align: center; font-weight: bold; border-bottom: 2px solid var(--border); font-size: 0.95rem; color: var(--success);">${totalJP}</td>
+          <td class="detail-cell" style="text-align: center;">${deleteBtn}</td>
         </tr>
       `;
 
@@ -3753,18 +4165,16 @@ function renderGuruMutlakRowspanTable() {
           </button>
         `;
         const nextClassBadge = `
-          <div style="display:inline-flex; align-items:center; gap:8px;">
-            <span class="badge b-siang" style="padding:4px 8px; border:1px solid rgba(56,189,248,.3); display:inline-flex; align-items:center; gap:5px;">
-              <i class="fa-solid fa-xmark text-muted cursor-pointer" onclick="deleteInstantGuruMutlak(${alloc.id_class_subject})" style="font-size:0.7rem;"></i> ${esc(alloc.nama_kelas)}
-            </span>
-            ${nextDeleteBtn}
-          </div>
+          <span class="badge b-siang" style="padding:4px 8px; border:1px solid rgba(56,189,248,.3); display:inline-flex; align-items:center; gap:5px;">
+            ${esc(alloc.nama_kelas)}
+          </span>
         `;
         html += `
           <tr class="hoverable-row">
             <td class="detail-cell">${nextClassBadge}</td>
             <td class="detail-cell">${esc(alloc.nama_mapel)}</td>
             <td class="detail-cell" style="text-align: center;"><strong>${alloc.durasi_jp}</strong> JP</td>
+            <td class="detail-cell" style="text-align: center;">${nextDeleteBtn}</td>
           </tr>
         `;
       }
@@ -3783,6 +4193,7 @@ function renderGuruMutlakRowspanTable() {
               <option value="">Mapel</option>
             </select>
           </td>
+          <td style="text-align: center; color: var(--muted);">-</td>
           <td style="text-align: center; white-space:nowrap;">
             <button class="btn-inline-action btn-inline-save" onclick="saveInlineGM(${t.id_guru}, this)" title="Simpan">✓</button>
             <button class="btn-inline-action btn-inline-cancel" onclick="cancelInlineGM(${t.id_guru}, this)" title="Batal">✗</button>
@@ -3880,6 +4291,84 @@ window.cancelInlineGM = function(teacherId, btnEl) {
     mapelSelect.innerHTML = '<option value="">Mapel</option>';
     mapelSelect.disabled = true;
   }
+};
+
+// Cache setting JP limits untuk dipakai di render
+let _jpLimitsCache = { max_jp_ideal: 3, max_jp_darurat: 4, split_multi_subject: true, multi_subject_jp_threshold: 4 };
+
+async function loadJpLimits() {
+  try {
+    const data = await api("GET", "/api/settings/jp-limits");
+    if (data) {
+      _jpLimitsCache = data;
+      const inpIdeal      = $("input-jp-ideal");
+      const inpDarurat    = $("input-jp-darurat");
+      const chkSplitMulti = $("chk-split-multi-subject");
+      const inpThreshold  = $("input-multi-subject-threshold");
+
+      if (inpIdeal)      inpIdeal.value      = data.max_jp_ideal;
+      if (inpDarurat)    inpDarurat.value    = data.max_jp_darurat;
+      if (chkSplitMulti) chkSplitMulti.checked = data.split_multi_subject !== false;
+      if (inpThreshold)  inpThreshold.value  = data.multi_subject_jp_threshold || 4;
+    }
+  } catch (e) {
+    console.warn("Gagal load JP limits:", e);
+  }
+}
+
+async function saveJpLimits() {
+  const inpIdeal      = $("input-jp-ideal");
+  const inpDarurat    = $("input-jp-darurat");
+  const chkSplitMulti = $("chk-split-multi-subject");
+  const inpThreshold  = $("input-multi-subject-threshold");
+  const statusEl      = $("jp-limits-status");
+  if (!inpIdeal || !inpDarurat) return;
+
+  const ideal      = parseInt(inpIdeal.value, 10);
+  const darurat    = parseInt(inpDarurat.value, 10);
+  const splitMulti = chkSplitMulti ? chkSplitMulti.checked : true;
+  const threshold  = inpThreshold ? parseInt(inpThreshold.value, 10) : 4;
+
+  if (isNaN(ideal) || isNaN(darurat) || ideal < 1 || darurat < 1) {
+    if (statusEl) { statusEl.textContent = "❌ Nilai JP tidak valid (minimal 1)."; statusEl.style.color = "var(--danger)"; }
+    return;
+  }
+  if (ideal > darurat) {
+    if (statusEl) { statusEl.textContent = "❌ Batas ideal tidak boleh lebih besar dari batas darurat!"; statusEl.style.color = "var(--danger)"; }
+    return;
+  }
+  if (isNaN(threshold) || threshold < 1) {
+    if (statusEl) { statusEl.textContent = "❌ Batas threshold jam multi-mapel tidak valid (minimal 1)."; statusEl.style.color = "var(--danger)"; }
+    return;
+  }
+
+  try {
+    const payload = {
+      max_jp_ideal: ideal,
+      max_jp_darurat: darurat,
+      split_multi_subject: splitMulti,
+      multi_subject_jp_threshold: threshold
+    };
+    const data = await api("POST", "/api/settings/jp-limits", payload);
+    if (data && data.status === "SUCCESS") {
+      _jpLimitsCache = payload;
+      if (statusEl) { statusEl.textContent = `✅ ${data.message}`; statusEl.style.color = "var(--success)"; }
+      setTimeout(() => { if (statusEl) statusEl.textContent = ""; }, 4000);
+    } else {
+      if (statusEl) { statusEl.textContent = `❌ ${data.detail || "Gagal menyimpan."}`; statusEl.style.color = "var(--danger)"; }
+    }
+  } catch (e) {
+    if (statusEl) { statusEl.textContent = "❌ Error: " + e.message; statusEl.style.color = "var(--danger)"; }
+  }
+}
+
+$("btn-save-jp-limits")?.addEventListener("click", saveJpLimits);
+
+// Navigation helper
+window.openPgSettings = function(section) {
+  document.querySelectorAll(".settings-section").forEach(s => s.style.display = "none");
+  const target = $(`section-${section}`);
+  if (target) target.style.display = "block";
 };
 
 // Instant delete
@@ -4034,10 +4523,720 @@ $("form-gm-add-modal")?.addEventListener("submit", async (e) => {
   });
 });
 
+/* ─────────────────────────────────────────────
+   Menu Guru ≥4 JP per Kelas (1 Baris per Kejadian)
+   ───────────────────────────────────────────── */
+
+function renderGuru4JPTable() {
+  const tbody = $("tb-guru-4jp");
+  if (!tbody) return;
+
+  const maxIdeal   = _jpLimitsCache.max_jp_ideal   ?? 3;
+  const maxDarurat = _jpLimitsCache.max_jp_darurat ?? 4;
+
+  if (!state.timetable || state.timetable.length === 0) {
+    tbody.innerHTML = `<tr><td colspan="9" style="text-align:center; color:var(--muted); padding:20px;">Belum ada data jadwal yang digenerate. Silakan klik <strong>Generate Jadwal</strong> terlebih dahulu.</td></tr>`;
+    return;
+  }
+
+  // Kelompokkan slot mengajar per (guru, kelas, hari)
+  const grouped = {};
+  state.timetable.forEach(e => {
+    if (!e.id_guru || !e.id_kelas) return;
+    const key = `${e.id_guru}_${e.id_kelas}_${e.hari}`;
+    if (!grouped[key]) {
+      grouped[key] = {
+        id_guru: e.id_guru,
+        kode_guru: e.kode_guru,
+        nama_guru: e.nama_guru,
+        id_kelas: e.id_kelas,
+        nama_kelas: e.nama_kelas,
+        shift: e.shift_operasional,
+        hari: e.hari,
+        jps: [],
+        mapels: new Set()
+      };
+    }
+    grouped[key].jps.push(e.jam_ke);
+    if (e.nama_mapel) grouped[key].mapels.add(e.nama_mapel);
+  });
+
+  // Filter kejadian dimana total JP mengajar di kelas tersebut >= batas ideal
+  const heavyEntries = Object.values(grouped)
+    .filter(item => item.jps.length >= maxIdeal)
+    .sort((a, b) => b.jps.length - a.jps.length || a.nama_guru.localeCompare(b.nama_guru));
+
+  if (heavyEntries.length === 0) {
+    tbody.innerHTML = `
+      <tr>
+        <td colspan="9" style="text-align:center; color:var(--success); padding:24px; font-weight:600;">
+          <i class="fa-solid fa-circle-check" style="font-size:1.5rem; margin-bottom:6px; display:block;"></i>
+          Sempurna! Tidak ada guru yang mengajar ≥${maxIdeal} JP dalam satu kelas pada hari yang sama.
+        </td>
+      </tr>
+    `;
+    return;
+  }
+
+  let html = "";
+  heavyEntries.forEach((item, idx) => {
+    item.jps.sort((a, b) => a - b);
+    const mapelStr = Array.from(item.mapels).join(", ");
+    const jamStr   = item.jps.map(j => `Jam ke-${j}`).join(", ");
+    const jpCount  = item.jps.length;
+
+    let badgeStyle, statusText;
+    if (jpCount >= maxDarurat) {
+      // DARURAT — melebihi atau sama dengan batas darurat
+      badgeStyle = "background:rgba(239,68,68,0.18); color:var(--danger); border:1px solid rgba(239,68,68,0.3);";
+      statusText = `⚠️ DARURAT (${jpCount} JP)`;
+    } else {
+      // PERINGATAN — melebihi batas ideal tapi masih di bawah darurat
+      badgeStyle = "background:rgba(245,158,11,0.18); color:var(--warn); border:1px solid rgba(245,158,11,0.3);";
+      statusText = `⚡ PERINGATAN (${jpCount} JP)`;
+    }
+
+    html += `
+      <tr>
+        <td style="font-weight:600;">${idx + 1}</td>
+        <td><span class="badge b-umum">${esc(String(item.kode_guru || "-"))}</span></td>
+        <td style="font-weight:600;">${esc(item.nama_guru || "Tanpa Nama")}</td>
+        <td><strong>${esc(item.nama_kelas)}</strong></td>
+        <td>${badgeShift(item.shift)}</td>
+        <td><strong style="color:var(--primary-h);">${esc(item.hari)}</strong></td>
+        <td><span class="badge" style="font-size:0.85rem; font-weight:700; ${badgeStyle}">${jpCount} JP</span></td>
+        <td>
+          <div style="font-size:0.83rem; font-weight:600;">${esc(mapelStr)}</div>
+          <div style="font-size:0.75rem; color:var(--muted);">${esc(jamStr)}</div>
+        </td>
+        <td><span class="badge" style="${badgeStyle}">${statusText}</span></td>
+      </tr>
+    `;
+  });
+
+  tbody.innerHTML = html;
+}
+
+
+$("btn-refresh-guru-4jp")?.addEventListener("click", async () => {
+  showOverlay("Memuat ulang data...");
+  try {
+    await loadTimetable();
+    log("Data guru ≥4 JP per kelas berhasil diperbarui.", "ok");
+  } catch (err) {
+    log("Gagal memuat data: " + err.message, "err");
+  } finally {
+    hideOverlay();
+  }
+});
+
+/* ─────────────────────────────────────────────
+   Menu Ketersediaan Hari Mengajar Guru
+   ───────────────────────────────────────────── */
+
+let currentAvailShift = "PAGI"; // "PAGI" or "SIANG"
+let availTeacherDrafts = {}; // id_guru -> { hari_pagi: [...], hari_siang: [...] }
+
+function initAvailDrafts() {
+  availTeacherDrafts = {};
+  if (!state.teachers) return;
+  state.teachers.forEach(t => {
+    const defaultDays = t.hari_tersedia || [];
+    availTeacherDrafts[t.id_guru] = {
+      hari_pagi:  [...(Array.isArray(t.hari_tersedia_pagi)  ? t.hari_tersedia_pagi  : defaultDays)],
+      hari_siang: [...(Array.isArray(t.hari_tersedia_siang) ? t.hari_tersedia_siang : defaultDays)]
+    };
+  });
+}
+
+async function loadAvailabilityTable() {
+  const tbody = $("tb-avail-teachers");
+  if (!tbody) return;
+
+  if (!state.teachers || state.teachers.length === 0) {
+    tbody.innerHTML = `<tr><td colspan="10" style="text-align:center; color:var(--muted); padding:20px;"><i class="fa-solid fa-spinner fa-spin"></i> Memuat data guru...</td></tr>`;
+    await loadTeachers();
+  }
+
+  renderAvailabilityTable();
+}
+
+function renderAvailabilityTable() {
+  const tbody = $("tb-avail-teachers");
+  if (!tbody) return;
+
+  if (!state.teachers || state.teachers.length === 0) {
+    tbody.innerHTML = `<tr><td colspan="10" style="text-align:center; color:var(--muted); padding:20px;">Belum ada data guru di database. Silakan tambahkan data guru terlebih dahulu.</td></tr>`;
+    return;
+  }
+
+  // Inisialisasi draf jika belum ada
+  if (Object.keys(availTeacherDrafts).length === 0) {
+    initAvailDrafts();
+  }
+
+  // Urutkan guru berdasarkan kode_guru secara ascending (1, 2, 3, dst.)
+  const sortedTeachers = [...state.teachers].sort((a, b) => (parseInt(a.kode_guru) || 0) - (parseInt(b.kode_guru) || 0));
+
+  const isPagi = currentAvailShift === "PAGI";
+  const daysList = ["SENIN", "SELASA", "RABU", "KAMIS", "JUMAT", "SABTU"];
+
+  const dayShortMap = {
+    SENIN: "Sen",
+    SELASA: "Sel",
+    RABU: "Rab",
+    KAMIS: "Kam",
+    JUMAT: "Jum",
+    SABTU: "Sab"
+  };
+
+  let html = "";
+  sortedTeachers.forEach((t, idx) => {
+    const tid = t.id_guru;
+    const draft = availTeacherDrafts[tid] || { hari_pagi: [], hari_siang: [] };
+    const activeDays = isPagi ? draft.hari_pagi : draft.hari_siang;
+
+    let dayCheckboxesHtml = "";
+    daysList.forEach(day => {
+      const isChecked = activeDays.includes(day);
+      const shortName = dayShortMap[day] || day;
+      dayCheckboxesHtml += `
+        <td style="text-align:center; vertical-align:middle; padding:4px 2px;">
+          <label style="display:inline-flex; align-items:center; justify-content:center; gap:5px; cursor:pointer; user-select:none; width:100%; padding:4px 6px; border-radius:6px; background:${isChecked ? 'rgba(99,102,241,0.18)' : 'transparent'}; border: 1px solid ${isChecked ? 'rgba(99,102,241,0.4)' : 'var(--border)'}; transition: all 0.15s ease;">
+            <input type="checkbox" 
+                   class="avail-chk" 
+                   data-tid="${tid}" 
+                   data-day="${day}" 
+                   ${isChecked ? "checked" : ""} 
+                   style="width:15px; height:15px; cursor:pointer; accent-color:var(--primary); margin:0;" />
+            <span style="font-size:0.76rem; font-weight:700; color:${isChecked ? '#ffffff' : 'var(--muted)'};">${shortName}</span>
+          </label>
+        </td>
+      `;
+    });
+
+    const hasPagiRest = t.allowed_jp_pagi && Object.keys(t.allowed_jp_pagi).length > 0;
+    const hasSiangRest = t.allowed_jp_siang && Object.keys(t.allowed_jp_siang).length > 0;
+    const hasRest = isPagi ? hasPagiRest : hasSiangRest;
+    const restBadge = hasRest
+      ? `<span class="badge b-jam-terbatas btn-detail-jp" data-tid="${tid}" style="cursor:pointer; margin-left:8px;" title="Guru ini memiliki batasan jam pelajaran (JP) khusus - Klik untuk lihat rincian"><i class="fa-solid fa-clock"></i> Jam Terbatas</span>`
+      : ``;
+
+    const btnDetailClass = hasRest ? "btn-warn" : "btn-info";
+
+    html += `
+      <tr>
+        <td style="text-align:center; font-weight:600;">${idx + 1}</td>
+        <td style="text-align:center;"><span class="badge b-umum">${esc(String(t.kode_guru || "-"))}</span></td>
+        <td style="font-weight:600;">${esc(t.nama_guru)}${restBadge}</td>
+        ${dayCheckboxesHtml}
+        <td style="text-align:center; white-space:nowrap;">
+          <button class="btn btn-sm btn-ghost btn-check-all" data-tid="${tid}" style="padding:2px 7px; font-size:0.73rem;" title="Centang Semua Hari">Semua</button>
+          <button class="btn btn-sm btn-primary btn-save-single-teacher" data-tid="${tid}" style="padding:2px 8px; font-size:0.73rem;" title="Simpan Ketersediaan Hari Guru Ini"><i class="fa-solid fa-floppy-disk"></i> Simpan</button>
+          <button class="btn btn-sm ${btnDetailClass} btn-detail-jp" data-tid="${tid}" style="padding:2px 8px; font-size:0.73rem; margin-left:4px;" title="Lihat &amp; Atur Rincian Jam Pelajaran (JP) yang Tidak Bisa Mengajar"><i class="fa-solid fa-clock"></i> Detail Jam</button>
+        </td>
+      </tr>
+    `;
+  });
+
+  tbody.innerHTML = html;
+
+  // Bind event perubahan checkbox
+  tbody.querySelectorAll(".avail-chk").forEach(chk => {
+    chk.addEventListener("change", (e) => {
+      const tid = parseInt(e.target.dataset.tid);
+      const day = e.target.dataset.day;
+      if (!availTeacherDrafts[tid]) return;
+      const targetArr = isPagi ? availTeacherDrafts[tid].hari_pagi : availTeacherDrafts[tid].hari_siang;
+      if (e.target.checked) {
+        if (!targetArr.includes(day)) targetArr.push(day);
+      } else {
+        const idx = targetArr.indexOf(day);
+        if (idx !== -1) targetArr.splice(idx, 1);
+      }
+
+      // Update styling parent label secara langsung
+      const lbl = e.target.parentElement;
+      if (lbl) {
+        const span = lbl.querySelector("span");
+        if (e.target.checked) {
+          lbl.style.background = 'rgba(99,102,241,0.18)';
+          lbl.style.borderColor = 'rgba(99,102,241,0.4)';
+          if (span) span.style.color = '#ffffff';
+        } else {
+          lbl.style.background = 'transparent';
+          lbl.style.borderColor = 'var(--border)';
+          if (span) span.style.color = 'var(--muted)';
+        }
+      }
+    });
+  });
+
+  // Bind event tombol cepat per baris
+  tbody.querySelectorAll(".btn-check-all").forEach(btn => {
+    btn.addEventListener("click", () => {
+      const tid = parseInt(btn.dataset.tid);
+      if (!availTeacherDrafts[tid]) return;
+      if (isPagi) {
+        availTeacherDrafts[tid].hari_pagi = [...daysList];
+      } else {
+        availTeacherDrafts[tid].hari_siang = [...daysList];
+      }
+      renderAvailabilityTable();
+    });
+  });
+
+  // Bind event tombol Simpan per baris
+  tbody.querySelectorAll(".btn-save-single-teacher").forEach(btn => {
+    btn.addEventListener("click", async () => {
+      const tid = parseInt(btn.dataset.tid);
+      const draft = availTeacherDrafts[tid] || { hari_pagi: [], hari_siang: [] };
+      const teacher = state.teachers.find(t => t.id_guru === tid);
+      const tName = teacher ? teacher.nama_guru : "Guru";
+      
+      const originalHtml = btn.innerHTML;
+      btn.disabled = true;
+      btn.innerHTML = `<i class="fa-solid fa-spinner fa-spin"></i>`;
+      try {
+        await api("PUT", `/api/teachers/${tid}/availability`, {
+          id_guru: tid,
+          hari_tersedia_pagi: draft.hari_pagi,
+          hari_tersedia_siang: draft.hari_siang
+        });
+        log(`Berhasil menyimpan ketersediaan hari untuk ${tName}.`, "ok");
+        showToast(`Guru ${tName} berhasil diubah!`, "success");
+        if (teacher) {
+          teacher.hari_tersedia_pagi = [...draft.hari_pagi];
+          teacher.hari_tersedia_siang = [...draft.hari_siang];
+          teacher.hari_tersedia = Array.from(new Set([...draft.hari_pagi, ...draft.hari_siang]));
+        }
+      } catch (err) {
+        log(`Gagal menyimpan ketersediaan hari ${tName}: ${err.message}`, "err");
+        showToast(`Gagal mengubah ketersediaan hari ${tName}: ${err.message}`, "error");
+      } finally {
+        btn.disabled = false;
+        btn.innerHTML = originalHtml;
+      }
+    });
+  });
+
+  // Bind event tombol Detail Jam per baris
+  tbody.querySelectorAll(".btn-detail-jp").forEach(btn => {
+    btn.addEventListener("click", () => {
+      const tid = parseInt(btn.dataset.tid);
+      openTeacherJPRestrictionModal(tid, true);
+    });
+  });
+}
+
+// Switcher Shift Pagi / Siang
+$("btn-avail-shift-pagi")?.addEventListener("click", () => {
+  currentAvailShift = "PAGI";
+  $("btn-avail-shift-pagi").classList.add("on");
+  $("btn-avail-shift-siang").classList.remove("on");
+  renderAvailabilityTable();
+});
+
+$("btn-avail-shift-siang")?.addEventListener("click", () => {
+  currentAvailShift = "SIANG";
+  $("btn-avail-shift-siang").classList.add("on");
+  $("btn-avail-shift-pagi").classList.remove("on");
+  renderAvailabilityTable();
+});
+
+// Reset / Refresh draf
+$("btn-refresh-avail")?.addEventListener("click", async () => {
+  showOverlay("Memuat ulang data guru...");
+  try {
+    await loadTeachers();
+    renderAvailabilityTable();
+    log("Draf ketersediaan hari dikembalikan ke data awal database.", "info");
+    showToast("Data ketersediaan hari dimuat ulang dari database.", "info");
+  } catch (err) {
+    log("Gagal memuat data: " + err.message, "err");
+    showToast("Gagal memuat data: " + err.message, "error");
+  } finally {
+    hideOverlay();
+  }
+});
+
+// Simpan ketersediaan hari ke database
+$("btn-save-avail")?.addEventListener("click", async () => {
+  if (!state.teachers || state.teachers.length === 0) return;
+  const payload = state.teachers.map(t => {
+    const tid = t.id_guru;
+    const draft = availTeacherDrafts[tid] || { hari_pagi: [], hari_siang: [] };
+    return {
+      id_guru: tid,
+      hari_tersedia_pagi: draft.hari_pagi,
+      hari_tersedia_siang: draft.hari_siang
+    };
+  });
+
+  showOverlay("Menyimpan ketersediaan hari...");
+  try {
+    const res = await api("PUT", "/api/teachers/availability", payload);
+    log(`Berhasil menyimpan ketersediaan hari untuk ${res.updated_count} guru.`, "ok");
+    showToast(`Ketersediaan hari untuk ${res.updated_count} guru berhasil diubah!`, "success");
+    await refreshAllData();
+    initAvailDrafts();
+    renderAvailabilityTable();
+  } catch (err) {
+    log("Gagal menyimpan ketersediaan hari: " + err.message, "err");
+    showToast(`Gagal menyimpan ketersediaan hari: ${err.message}`, "error");
+  } finally {
+    hideOverlay();
+  }
+});
+
+/* ─────────────────────────────────────────────
+   Time Slots (Pengaturan Jam Pelajaran & Waktu)
+   ───────────────────────────────────────────── */
+
+let currentTsShift = "PAGI";
+let currentTsDay   = "SENIN";
+let currentTsSlots = [];
+
+async function loadTimeSlots(shift = currentTsShift, day = currentTsDay) {
+  currentTsShift = shift;
+  currentTsDay   = day;
+
+  // Active state UI Shift
+  if ($("btn-ts-shift-pagi") && $("btn-ts-shift-siang")) {
+    $("btn-ts-shift-pagi").className = `sub-btn ${shift === 'PAGI' ? 'on' : ''}`;
+    $("btn-ts-shift-siang").className = `sub-btn ${shift === 'SIANG' ? 'on' : ''}`;
+  }
+
+  // Active state UI Hari
+  document.querySelectorAll(".ts-day-tab").forEach(tab => {
+    if (tab.dataset.day === day) {
+      tab.className = "btn btn-sm btn-primary ts-day-tab on";
+    } else {
+      tab.className = "btn btn-sm btn-ghost ts-day-tab";
+    }
+  });
+
+  if ($("ts-info-title")) {
+    $("ts-info-title").textContent = `Hari ${day} (Shift ${shift})`;
+  }
+  if ($("ts-info-desc")) {
+    $("ts-info-desc").textContent = `Konfigurasi jam alokasi waktu untuk hari ${day} (${shift}).`;
+  }
+
+  try {
+    const slots = await api("GET", `/api/time-slots?shift=${shift}&hari=${day}`);
+    currentTsSlots = Array.isArray(slots) ? slots : [];
+    renderTimeSlotsTable();
+  } catch (err) {
+    log(`Gagal memuat alokasi waktu jam: ${err.message}`, "err");
+  }
+}
+
+function renderTimeSlotsTable() {
+  const tbody = $("tbody-time-slots");
+  if (!tbody) return;
+
+  tbody.innerHTML = "";
+  if (currentTsSlots.length === 0) {
+    tbody.innerHTML = `<tr><td colspan="7" class="text-muted" style="text-align:center;padding:24px">Belum ada alokasi jam untuk hari ${currentTsDay} (${currentTsShift}). Klik <strong>Tambah Slot Jam</strong> untuk menambah.</td></tr>`;
+    return;
+  }
+
+  currentTsSlots.forEach((slot, idx) => {
+    const tr = document.createElement("tr");
+    tr.style.borderBottom = "1px solid var(--border)";
+
+    const isKbm = (slot.tipe_slot === "KBM");
+
+    tr.innerHTML = `
+      <td style="padding:10px; text-align:center; font-weight:600; color:var(--muted);">${idx + 1}</td>
+      <td style="padding:8px 10px;">
+        <select class="ts-input-tipe form-control" data-idx="${idx}" style="background:var(--bg); color:var(--text); border:1px solid var(--border); padding:6px 10px; border-radius:6px; font-size:.85rem; width:100%;">
+          <option value="KBM" ${slot.tipe_slot === 'KBM' ? 'selected' : ''}>KBM (Jam Pelajaran)</option>
+          <option value="ISTIRAHAT" ${slot.tipe_slot === 'ISTIRAHAT' ? 'selected' : ''}>Istirahat</option>
+          <option value="UPACARA" ${slot.tipe_slot === 'UPACARA' ? 'selected' : ''}>Upacara / Apel</option>
+          <option value="SHOLAT" ${slot.tipe_slot === 'SHOLAT' ? 'selected' : ''}>Sholat / Kegiatan</option>
+        </select>
+      </td>
+      <td style="padding:8px 10px; text-align:center;">
+        <input type="number" class="ts-input-jam-ke form-control" data-idx="${idx}" min="1" max="15" value="${slot.jam_ke !== null && slot.jam_ke !== undefined ? slot.jam_ke : ''}" ${!isKbm ? 'disabled placeholder="—"' : ''} style="background:var(--bg); color:var(--text); border:1px solid var(--border); padding:6px 8px; border-radius:6px; font-size:.85rem; width:70px; text-align:center;" />
+      </td>
+      <td style="padding:8px 10px;">
+        <input type="time" class="ts-input-jam-mulai form-control" data-idx="${idx}" value="${slot.jam_mulai || '07:00'}" style="background:var(--bg); color:var(--text); border:1px solid var(--border); padding:6px 8px; border-radius:6px; font-size:.85rem; width:100%; text-align:center;" />
+      </td>
+      <td style="padding:8px 10px;">
+        <input type="time" class="ts-input-jam-selesai form-control" data-idx="${idx}" value="${slot.jam_selesai || '07:45'}" style="background:var(--bg); color:var(--text); border:1px solid var(--border); padding:6px 8px; border-radius:6px; font-size:.85rem; width:100%; text-align:center;" />
+      </td>
+      <td style="padding:8px 10px;">
+        <span class="badge ${isKbm ? 'b-pagi' : 'b-olahraga'}" style="font-family:'JetBrains Mono',monospace; font-size:.82rem; padding:4px 8px;">
+          ${slot.jam_mulai || '00:00'} - ${slot.jam_selesai || '00:00'} ${isKbm ? `(Jam ${slot.jam_ke || '?'})` : `(${slot.tipe_slot})`}
+        </span>
+      </td>
+      <td style="padding:8px 10px; text-align:center;">
+        <div style="display:flex; gap:4px; justify-content:center;">
+          <button class="btn-inline-action btn-ts-up" data-idx="${idx}" title="Geser Naik" ${idx === 0 ? 'disabled style="opacity:0.4"' : ''}><i class="fa-solid fa-arrow-up"></i></button>
+          <button class="btn-inline-action btn-ts-down" data-idx="${idx}" title="Geser Turun" ${idx === currentTsSlots.length - 1 ? 'disabled style="opacity:0.4"' : ''}><i class="fa-solid fa-arrow-down"></i></button>
+          <button class="btn-inline-action btn-inline-delete btn-ts-del" data-idx="${idx}" title="Hapus"><i class="fa-solid fa-trash"></i></button>
+        </div>
+      </td>
+    `;
+    tbody.appendChild(tr);
+  });
+
+  // Attach event handlers inside table
+  tbody.querySelectorAll(".ts-input-tipe").forEach(el => {
+    el.addEventListener("change", (e) => {
+      const i = parseInt(e.target.dataset.idx);
+      currentTsSlots[i].tipe_slot = e.target.value;
+      if (e.target.value !== "KBM") {
+        currentTsSlots[i].jam_ke = null;
+      } else if (!currentTsSlots[i].jam_ke) {
+        currentTsSlots[i].jam_ke = 1;
+      }
+      renderTimeSlotsTable();
+    });
+  });
+
+  tbody.querySelectorAll(".ts-input-jam-ke").forEach(el => {
+    el.addEventListener("input", (e) => {
+      const i = parseInt(e.target.dataset.idx);
+      currentTsSlots[i].jam_ke = e.target.value !== "" ? parseInt(e.target.value) : null;
+    });
+  });
+
+  tbody.querySelectorAll(".ts-input-jam-mulai").forEach(el => {
+    el.addEventListener("change", (e) => {
+      const i = parseInt(e.target.dataset.idx);
+      currentTsSlots[i].jam_mulai = e.target.value;
+      renderTimeSlotsTable();
+    });
+  });
+
+  tbody.querySelectorAll(".ts-input-jam-selesai").forEach(el => {
+    el.addEventListener("change", (e) => {
+      const i = parseInt(e.target.dataset.idx);
+      currentTsSlots[i].jam_selesai = e.target.value;
+      renderTimeSlotsTable();
+    });
+  });
+
+  tbody.querySelectorAll(".btn-ts-up").forEach(el => {
+    el.addEventListener("click", () => {
+      const i = parseInt(el.dataset.idx);
+      if (i > 0) {
+        const temp = currentTsSlots[i];
+        currentTsSlots[i] = currentTsSlots[i - 1];
+        currentTsSlots[i - 1] = temp;
+        renderTimeSlotsTable();
+      }
+    });
+  });
+
+  tbody.querySelectorAll(".btn-ts-down").forEach(el => {
+    el.addEventListener("click", () => {
+      const i = parseInt(el.dataset.idx);
+      if (i < currentTsSlots.length - 1) {
+        const temp = currentTsSlots[i];
+        currentTsSlots[i] = currentTsSlots[i + 1];
+        currentTsSlots[i + 1] = temp;
+        renderTimeSlotsTable();
+      }
+    });
+  });
+
+  tbody.querySelectorAll(".btn-ts-del").forEach(el => {
+    el.addEventListener("click", () => {
+      const i = parseInt(el.dataset.idx);
+      currentTsSlots.splice(i, 1);
+      renderTimeSlotsTable();
+    });
+  });
+}
+
+// Handler shift switch
+$("btn-ts-shift-pagi")?.addEventListener("click", () => loadTimeSlots("PAGI", currentTsDay));
+$("btn-ts-shift-siang")?.addEventListener("click", () => loadTimeSlots("SIANG", currentTsDay));
+
+// Handler day tab click
+document.querySelectorAll(".ts-day-tab").forEach(btn => {
+  btn.addEventListener("click", () => {
+    const day = btn.dataset.day;
+    loadTimeSlots(currentTsShift, day);
+  });
+});
+
+// Handler Tambah Row Slot Jam
+function addTsRow() {
+  if (!Array.isArray(currentTsSlots)) currentTsSlots = [];
+  let nextJamKe = 1;
+  const kbmSlots = currentTsSlots.filter(s => s.tipe_slot === "KBM" && s.jam_ke);
+  if (kbmSlots.length > 0) {
+    nextJamKe = Math.max(...kbmSlots.map(s => s.jam_ke)) + 1;
+  }
+
+  let lastEndTime = "07:00";
+  if (currentTsSlots.length > 0) {
+    lastEndTime = currentTsSlots[currentTsSlots.length - 1].jam_selesai || "07:00";
+  }
+
+  currentTsSlots.push({
+    hari: currentTsDay,
+    shift: currentTsShift,
+    jam_ke: nextJamKe,
+    tipe_slot: "KBM",
+    jam_mulai: lastEndTime,
+    jam_selesai: lastEndTime,
+    keterangan: `Jam Ke-${nextJamKe}`,
+    urutan: currentTsSlots.length + 1
+  });
+
+  renderTimeSlotsTable();
+}
+
+// Handler Simpan Time Slots
+async function saveTimeSlotsHandler() {
+  if (currentTsSlots.length === 0) {
+    if (!confirm(`Tabel jam untuk ${currentTsDay} (${currentTsShift}) kosong. Simpan dengan menghapus semua slot hari ini?`)) {
+      return;
+    }
+  }
+
+  showOverlay(`Menyimpan alokasi jam ${currentTsDay}...`);
+  try {
+    const payload = {
+      hari: currentTsDay,
+      shift: currentTsShift,
+      slots: currentTsSlots.map((s, idx) => ({
+        ...s,
+        urutan: idx + 1
+      }))
+    };
+    const res = await api("POST", "/api/time-slots/bulk", payload);
+    log(`Berhasil menyimpan jam untuk ${currentTsDay} (${currentTsShift}).`, "ok");
+    await loadTimeSlots(currentTsShift, currentTsDay);
+  } catch (err) {
+    log(`Gagal menyimpan alokasi jam: ${err.message}`, "err");
+  } finally {
+    hideOverlay();
+  }
+}
+
+// Handler Reset Default Time Slots
+async function resetTimeSlotsHandler() {
+  if (!confirm("Apakah Anda yakin ingin mengembalikan seluruh alokasi waktu jam ke standar default sekolah? Data yang diubah manual akan ditimpa.")) {
+    return;
+  }
+
+  showOverlay("Mereset alokasi waktu jam ke default...");
+  try {
+    await api("POST", "/api/time-slots/reset");
+    log("Alokasi waktu jam berhasil di-reset ke standar default.", "ok");
+    await loadTimeSlots(currentTsShift, currentTsDay);
+  } catch (err) {
+    log(`Gagal reset alokasi waktu: ${err.message}`, "err");
+  } finally {
+    hideOverlay();
+  }
+}
+
+function openCopyTsModal() {
+  if ($("copy-ts-source-day-name")) {
+    $("copy-ts-source-day-name").textContent = currentTsDay;
+  }
+  
+  // Uncheck source day from options
+  const checkboxes = document.querySelectorAll("#copy-ts-days-checkboxes input[type='checkbox']");
+  checkboxes.forEach(cb => {
+    if (cb.value === currentTsDay) {
+      cb.checked = false;
+      cb.parentElement.style.display = "none";
+    } else {
+      cb.parentElement.style.display = "flex";
+      cb.checked = (cb.value !== "JUMAT" && cb.value !== "SABTU");
+    }
+  });
+
+  const modal = $("modal-copy-time-slots");
+  if (modal) modal.style.display = "flex";
+}
+
+// Expose window functions for inline onclick handlers
+window.addTsRow = addTsRow;
+window.saveTimeSlotsHandler = saveTimeSlotsHandler;
+window.resetTimeSlotsHandler = resetTimeSlotsHandler;
+window.openCopyTsModal = openCopyTsModal;
+window.loadTimeSlots = loadTimeSlots;
+
+// Modal Copy Time Slots
+$("btn-copy-ts-days")?.addEventListener("click", () => {
+  if ($("copy-ts-source-day-name")) {
+    $("copy-ts-source-day-name").textContent = currentTsDay;
+  }
+  
+  // Uncheck source day from options
+  const checkboxes = document.querySelectorAll("#copy-ts-days-checkboxes input[type='checkbox']");
+  checkboxes.forEach(cb => {
+    if (cb.value === currentTsDay) {
+      cb.checked = false;
+      cb.parentElement.style.display = "none";
+    } else {
+      cb.parentElement.style.display = "flex";
+      cb.checked = (cb.value !== "JUMAT" && cb.value !== "SABTU");
+    }
+  });
+
+  const modal = $("modal-copy-time-slots");
+  if (modal) modal.style.display = "flex";
+});
+
+$("btn-copy-ts-close")?.addEventListener("click", () => {
+  const modal = $("modal-copy-time-slots");
+  if (modal) modal.style.display = "none";
+});
+
+$("btn-copy-ts-cancel")?.addEventListener("click", () => {
+  const modal = $("modal-copy-time-slots");
+  if (modal) modal.style.display = "none";
+});
+
+$("form-copy-time-slots")?.addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const selectedDays = [];
+  document.querySelectorAll("#copy-ts-days-checkboxes input[type='checkbox']:checked").forEach(cb => {
+    selectedDays.push(cb.value);
+  });
+
+  if (selectedDays.length === 0) {
+    alert("Pilih minimal satu hari tujuan.");
+    return;
+  }
+
+  showOverlay(`Menyalin alokasi jam dari ${currentTsDay} ke ${selectedDays.join(", ")}...`);
+  try {
+    const payload = {
+      hari_asal: currentTsDay,
+      hari_tujuan: selectedDays,
+      shift: currentTsShift
+    };
+    const res = await api("POST", "/api/time-slots/copy", payload);
+    log(res.message, "ok");
+    const modal = $("modal-copy-time-slots");
+    if (modal) modal.style.display = "none";
+  } catch (err) {
+    log(`Gagal menyalin alokasi jam: ${err.message}`, "err");
+  } finally {
+    hideOverlay();
+  }
+});
+
+
 async function init() {
   log("[SYSTEM] Memuat data awal...", "sys");
   await loadSettings();
+  await loadLmsEndpoints();
   await refreshAllData();
+  initAvailDrafts();
+  await loadTimeSlots();
   log("[SYSTEM] SITAB siap!", "ok");
 }
 

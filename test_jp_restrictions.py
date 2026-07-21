@@ -116,7 +116,7 @@ def run_test():
         db_execute(
             conn, 
             "UPDATE teachers SET allowed_jp_pagi = %s, allowed_jp_siang = %s WHERE id_guru = %s",
-            (json.dumps(orig_pagi) if orig_pagi else None, json.dumps(orig_siang) if orig_siang else None, target_teacher['id_guru'])
+            (orig_pagi, orig_siang, target_teacher['id_guru'])
         )
         conn.commit()
         

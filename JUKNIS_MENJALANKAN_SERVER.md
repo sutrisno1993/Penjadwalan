@@ -34,10 +34,10 @@ Server backend SITAB dibangun dengan FastAPI dan telah dikonfigurasi untuk menya
 
 Jalankan perintah berikut:
 ```bash
-py -m uvicorn backend.main:app --host 127.0.0.1 --port 8002 --reload
+python -m uvicorn backend.main:app --host 127.0.0.1 --port 8002 --reload
 ```
 * **Keterangan Perintah:**
-  * `py -m uvicorn`: Menjalankan server ASGI Uvicorn menggunakan Python.
+  * `python -m uvicorn`: Menjalankan server ASGI Uvicorn menggunakan Python.
   * `backend.main:app`: Merujuk ke file `backend/main.py` dengan objek FastAPI bernama `app`.
   * `--host 127.0.0.1`: Menjalankan server pada localhost.
   * `--port 8002`: Port server backend dijalankan.
@@ -53,10 +53,10 @@ Jika Anda ingin mengembangkan frontend secara terpisah pada port lain (misalnya 
 
 Jalankan perintah berikut di jendela terminal baru:
 ```bash
-py -m http.server 3000 --directory frontend
+python -m http.server 3000 --directory frontend
 ```
 * **Keterangan Perintah:**
-  * `py -m http.server`: Mengaktifkan modul server HTTP bawaan Python.
+  * `python -m http.server`: Mengaktifkan modul server HTTP bawaan Python.
   * `3000`: Port tempat server berjalan.
   * `--directory frontend`: Menentukan bahwa folder yang disajikan adalah folder `frontend`.
 
@@ -73,3 +73,30 @@ Untuk mematikan server yang sedang berjalan di terminal/command prompt:
 1. Klik pada jendela terminal tersebut.
 2. Tekan kombinasi tombol **`Ctrl + C`** pada keyboard Anda.
 3. (Optional) Jika muncul pertanyaan `Terminate batch job (Y/N)?`, ketik `Y` lalu tekan **Enter**.
+
+---
+
+## 🔧 Troubleshooting (Pemecahan Masalah)
+
+### 1. Layar Berwarna Gelap / "Blank Loading" Terus-menerus
+Jika Anda mengakses `http://localhost:8002` dan hanya melihat layar kosong atau indikator loading yang tidak pernah selesai, ini biasanya terjadi karena proses **Uvicorn mengalami *hang* atau macet** (terutama jika menggunakan mode `--reload` pada Windows). Server induk berhenti tetapi proses anaknya masih menahan port `8002`.
+
+**Solusi:**
+Anda perlu mematikan paksa proses Python yang menahan port `8002` lalu menjalankan server kembali **tanpa** mode `--reload`:
+1. Buka **Command Prompt (CMD)**.
+2. Cari Process ID (PID) yang mengunci port 8002:
+   ```bash
+   netstat -ano | findstr :8002
+   ```
+3. Perhatikan angka di kolom paling kanan (itu adalah **PID**).
+4. Hentikan paksa proses tersebut:
+   ```bash
+   taskkill /F /PID <Angka_PID_Tadi>
+   ```
+5. Jalankan kembali server tanpa flag `--reload`:
+   ```bash
+   python -m uvicorn backend.main:app --host 127.0.0.1 --port 8002
+   ```
+
+> [!TIP]
+> Jika Anda hanya ingin menggunakan aplikasi (bukan sedang *coding* atau mengubah kode backend), **jangan** gunakan opsi `--reload` untuk mencegah masalah ini terjadi lagi. Gunakan perintah `python -m uvicorn backend.main:app --host 127.0.0.1 --port 8002`.
