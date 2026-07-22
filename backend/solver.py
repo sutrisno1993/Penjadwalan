@@ -1013,11 +1013,22 @@ def _run_solver(teachers, classes, allocations, ts_set, subjects_map, stage, tim
                         model.Add(sum(v1) + sum(v2) + sum(v3) + sum(v4) <= 3 + four_consec)
                         obj.append(-200 * four_consec)
 
+    # ── Map Allocations to Class-Teacher pairs ────────────────────────
+    class_teacher_allocs = {}
+    for a in allocations:
+        aid = a["id_class_subject"]
+        cid = a["id_kelas"]
+        cands = candidates.get(aid, [])
+        for tid in cands:
+            class_teacher_allocs.setdefault((cid, tid), []).append(a)
+
     # ── Constraint: Batas Jam Mengajar Per Guru Per Kelas Per Hari (Ideal <= 3 JP, Maks 4 JP) ────
     by_class_teacher_day = {}
     for key, var in x.items():
         cid, day, jp, aid, tid = key
         by_class_teacher_day.setdefault((cid, tid, day), []).append(var)
+
+    teacher_day_4jp_vars = {}
 
     for (cid, tid, day), vars_list in by_class_teacher_day.items():
         if vars_list:
@@ -1027,13 +1038,11 @@ def _run_solver(teachers, classes, allocations, ts_set, subjects_map, stage, tim
             # Hard constraint: Maksimal limit dalam 1 hari untuk kelas yang sama
             model.Add(sum(vars_list) <= limit)
 
-            # Prevent teaching periods 1 to 4 consecutively on the same day in the same class
-            p1_4_vars = [
-                v for k, v in x.items()
-                if k[0] == cid and k[1] == day and k[4] == tid and k[2] in (1, 2, 3, 4)
-            ]
-            if len(p1_4_vars) == 4:
-                model.Add(sum(p1_4_vars) <= 3)
+            # Definisikan is_4jp_or_more untuk melonggarkan split_multi_subject
+            is_4jp_or_more = model.NewBoolVar(f"is_4jp_or_more_c{cid}_t{tid}_{day}")
+            model.Add(sum(vars_list) >= 4).OnlyEnforceIf(is_4jp_or_more)
+            model.Add(sum(vars_list) <= 3).OnlyEnforceIf(is_4jp_or_more.Not())
+            teacher_day_4jp_vars[(cid, tid, day)] = is_4jp_or_more
 
             # Soft constraint: Penalti jika terpaksa >= (limit) JP (mengutamakan lebih sedikit)
             is_maxjp = model.NewBoolVar(f"is_maxjp_c{cid}_t{tid}_{day}")
@@ -1041,16 +1050,22 @@ def _run_solver(teachers, classes, allocations, ts_set, subjects_map, stage, tim
             model.Add(sum(vars_list) != limit).OnlyEnforceIf(is_maxjp.Not())
             obj.append(-400 * is_maxjp)
 
+            # Soft constraint: Penalti jika guru mengajar >= 4 JP untuk mapel yang sama
+            allocs_ct = class_teacher_allocs.get((cid, tid), [])
+            for a in allocs_ct:
+                aid = a["id_class_subject"]
+                vars_a = [
+                    var for key, var in x.items()
+                    if key[0] == cid and key[1] == day and key[3] == aid and key[4] == tid
+                ]
+                if len(vars_a) >= 4:
+                    is_single_mapel_ge_4 = model.NewBoolVar(f"single_ge4_c{cid}_t{tid}_a{aid}_{day}")
+                    model.Add(sum(vars_a) >= 4).OnlyEnforceIf(is_single_mapel_ge_4)
+                    model.Add(sum(vars_a) <= 3).OnlyEnforceIf(is_single_mapel_ge_4.Not())
+                    obj.append(-600 * is_single_mapel_ge_4)
+
     # ── Constraint: Pemisahan Hari untuk Guru Multi-Mapel di Kelas Sama ────────
     if split_multi_subject:
-        class_teacher_allocs = {}
-        for a in allocations:
-            aid = a["id_class_subject"]
-            cid = a["id_kelas"]
-            cands = candidates.get(aid, [])
-            for tid in cands:
-                class_teacher_allocs.setdefault((cid, tid), []).append(a)
-
         for (cid, tid), allocs_ct in class_teacher_allocs.items():
             t = teachers_map[tid]
             shift = classes_map[cid]["shift_operasional"]
@@ -1074,7 +1089,11 @@ def _run_solver(teachers, classes, allocations, ts_set, subjects_map, stage, tim
                                 aid_active_vars.append(is_active)
 
                         if len(aid_active_vars) > 1:
-                            model.Add(sum(aid_active_vars) <= 1)
+                            is_4jp_or_more = teacher_day_4jp_vars.get((cid, tid, day))
+                            if is_4jp_or_more is not None:
+                                model.Add(sum(aid_active_vars) <= 1).OnlyEnforceIf(is_4jp_or_more.Not())
+                            else:
+                                model.Add(sum(aid_active_vars) <= 1)
 
     # ── Soft Constraint: Pemerataan beban guru (DILIGHTEN SEVERELY) ─────────
     # Hanya catat beban, tanpa logic perbandingan yang berat
