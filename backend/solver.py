@@ -235,15 +235,16 @@ def _preflight(teachers, classes, allocations, ts_set, subjects_map=None, max_jp
         if t and tot_jp > 0:
             shift = next((c["shift_operasional"] for c in classes if c["id_kelas"] == cid), "PAGI")
             avail_days = t["hari_tersedia_pagi"] if shift == "PAGI" else t["hari_tersedia_siang"]
-            max_in_class = len(avail_days) * max_jp_darurat
+            limit = 5 if ("LELIYANI" in t["nama_guru"].upper() and shift == "SIANG") else max_jp_darurat
+            max_in_class = len(avail_days) * limit
             if tot_jp > max_in_class:
-                min_days = math.ceil(tot_jp / max_jp_darurat)
+                min_days = math.ceil(tot_jp / limit)
                 needed_days = min_days - len(avail_days)
                 excess_jp = tot_jp - max_in_class
                 errors.append(
                     f"⛔ Guru Mutlak [{t['nama_guru']}] di Kelas [{kelas_nama}] mengampu total {tot_jp} JP, "
                     f"tetapi hanya memiliki {len(avail_days)} hari ketersediaan ({', '.join(avail_days) or 'Tidak Ada'}).\n"
-                    f"   • Batas maksimal mengajar di 1 kelas adalah {max_jp_darurat} JP/hari (Hard Constraint).\n"
+                    f"   • Batas maksimal mengajar di 1 kelas adalah {limit} JP/hari (Hard Constraint).\n"
                     f"   💡 REKOMENDASI SOLUSI FORMASI:\n"
                     f"     1. (Tambah Hari Guru) Tambahkan ketersediaan hari {t['nama_guru']} minimal {needed_days} hari lagi (butuh minimal {min_days} hari).\n"
                     f"     2. (Kurangi Jam Alokasi) Kurangi beban alokasi jam mengajar {t['nama_guru']} di Kelas [{kelas_nama}] sebanyak {excess_jp} JP.\n"
@@ -266,6 +267,9 @@ def _preflight(teachers, classes, allocations, ts_set, subjects_map=None, max_jp
                     kelas_nama = next((c["nama_kelas"] for c in classes if c["id_kelas"] == cid), str(cid))
                     if t and tot_jp > 0:
                         shift = next((c["shift_operasional"] for c in classes if c["id_kelas"] == cid), "PAGI")
+                        # Pengecualian Leliyani di shift SIANG
+                        if "LELIYANI" in t["nama_guru"].upper() and shift == "SIANG":
+                            continue
                         avail_days = t["hari_tersedia_pagi"] if shift == "PAGI" else t["hari_tersedia_siang"]
                         needed_days = len(allocs_ct)
                         if len(avail_days) < needed_days:
@@ -281,7 +285,25 @@ def _preflight(teachers, classes, allocations, ts_set, subjects_map=None, max_jp
                                 f"     2. (Ubah Guru Pengampu) Serahkan salah satu mapel ke guru lain di Tab 5."
                             )
 
-    # 5. Shift Capacity & Availability check for each Subject
+    # 4d. Mapel durasi > 3 JP wajib dipecah hari (memerlukan minimal 2 hari tersedia)
+    for a in allocations:
+        id_fixed = a.get("id_guru_mutlak")
+        if id_fixed and a["durasi_jp"] > 3:
+            t = teachers_map.get(id_fixed)
+            if t:
+                shift = a["shift_operasional"]
+                avail_days = t["hari_tersedia_pagi"] if shift == "PAGI" else t["hari_tersedia_siang"]
+                if len(avail_days) < 2:
+                    errors.append(
+                        f"⛔ Guru Mutlak [{t['nama_guru']}] mengampu Mapel [{a['nama_mapel']}] "
+                        f"dengan durasi {a['durasi_jp']} JP di Kelas [{a['nama_kelas']}], "
+                        f"tetapi hanya memiliki {len(avail_days)} hari ketersediaan ({', '.join(avail_days) or 'Tidak Ada'}).\n"
+                        f"   • Mapel dengan durasi > 3 JP tidak boleh diajarkan penuh dalam 1 hari (Maks 3 JP/hari untuk mapel yang sama).\n"
+                        f"   💡 REKOMENDASI SOLUSI FORMASI:\n"
+                        f"     1. (Tambah Hari Guru) Tambahkan ketersediaan hari {t['nama_guru']} minimal 1 hari lagi agar dapat memecah jadwal mapel ini.\n"
+                        f"     2. (Ubah Guru Pengampu) Serahkan mapel ini ke guru lain yang memiliki hari tersedia minimal 2 hari di Tab 5."
+                    )
+
     if subjects_map:
         subj_shift_allocs = {}
         for a in allocations:
@@ -739,6 +761,16 @@ def _run_solver(teachers, classes, allocations, ts_set, subjects_map, stage, tim
             logger.warning(f"Alokasi [{aid}] tidak ada kandidat — infeasible untuk stage ini.")
             return None
 
+    # ── Constraint 2c: Dilarang mengajar mapel yang sama 4 JP berturut-turut pada Jam 1-4 ────
+    # Jika suatu mapel diajarkan 4 JP pada suatu hari, maka tidak boleh menempati Jam 1, 2, 3, 4 sekaligus.
+    for (cid, aid, day), vars_list in by_alloc_day.items():
+        p1_4_vars = [
+            var for key, var in x.items()
+            if key[0] == cid and key[1] == day and key[3] == aid and key[2] in (1, 2, 3, 4)
+        ]
+        if len(p1_4_vars) == 4:
+            model.Add(sum(p1_4_vars) <= 3)
+
     # ── Constraint 2b: 1 Kelas + 1 Mapel = hanya 1 Guru (HARD CONSTRAINT) ────
     # Untuk setiap alokasi (kelas+mapel), semua slot WAJIB diajarkan oleh
     # guru yang SAMA. Tidak boleh satu mapel dibagi ke beberapa guru.
@@ -989,13 +1021,24 @@ def _run_solver(teachers, classes, allocations, ts_set, subjects_map, stage, tim
 
     for (cid, tid, day), vars_list in by_class_teacher_day.items():
         if vars_list:
-            # Hard constraint: Maksimal max_jp_per_day dalam 1 hari untuk kelas yang sama
-            model.Add(sum(vars_list) <= max_jp_per_day)
+            t = teachers_map[tid]
+            shift = classes_map[cid]["shift_operasional"]
+            limit = 5 if ("LELIYANI" in t["nama_guru"].upper() and shift == "SIANG") else max_jp_per_day
+            # Hard constraint: Maksimal limit dalam 1 hari untuk kelas yang sama
+            model.Add(sum(vars_list) <= limit)
 
-            # Soft constraint: Penalti jika terpaksa >= (max_jp_per_day) JP (mengutamakan lebih sedikit)
+            # Prevent teaching periods 1 to 4 consecutively on the same day in the same class
+            p1_4_vars = [
+                v for k, v in x.items()
+                if k[0] == cid and k[1] == day and k[4] == tid and k[2] in (1, 2, 3, 4)
+            ]
+            if len(p1_4_vars) == 4:
+                model.Add(sum(p1_4_vars) <= 3)
+
+            # Soft constraint: Penalti jika terpaksa >= (limit) JP (mengutamakan lebih sedikit)
             is_maxjp = model.NewBoolVar(f"is_maxjp_c{cid}_t{tid}_{day}")
-            model.Add(sum(vars_list) == max_jp_per_day).OnlyEnforceIf(is_maxjp)
-            model.Add(sum(vars_list) != max_jp_per_day).OnlyEnforceIf(is_maxjp.Not())
+            model.Add(sum(vars_list) == limit).OnlyEnforceIf(is_maxjp)
+            model.Add(sum(vars_list) != limit).OnlyEnforceIf(is_maxjp.Not())
             obj.append(-400 * is_maxjp)
 
     # ── Constraint: Pemisahan Hari untuk Guru Multi-Mapel di Kelas Sama ────────
@@ -1009,6 +1052,10 @@ def _run_solver(teachers, classes, allocations, ts_set, subjects_map, stage, tim
                 class_teacher_allocs.setdefault((cid, tid), []).append(a)
 
         for (cid, tid), allocs_ct in class_teacher_allocs.items():
+            t = teachers_map[tid]
+            shift = classes_map[cid]["shift_operasional"]
+            if "LELIYANI" in t["nama_guru"].upper() and shift == "SIANG":
+                continue
             if len(allocs_ct) >= 2:
                 tot_jp = sum(a["durasi_jp"] for a in allocs_ct)
                 if tot_jp > multi_subject_jp_threshold:
@@ -1295,20 +1342,40 @@ def _diagnose_infeasibility(teachers, classes, allocations, ts_set, subjects_map
         if t and tot_jp > 0:
             shift = next((c["shift_operasional"] for c in classes if c["id_kelas"] == cid), "PAGI")
             avail_days = t["hari_tersedia_pagi"] if shift == "PAGI" else t["hari_tersedia_siang"]
-            max_in_class = len(avail_days) * 4
+            limit = 5 if ("LELIYANI" in t["nama_guru"].upper() and shift == "SIANG") else 4
+            max_in_class = len(avail_days) * limit
             if tot_jp > max_in_class:
-                min_days = math.ceil(tot_jp / 4)
+                min_days = math.ceil(tot_jp / limit)
                 needed_days = min_days - len(avail_days)
                 excess_jp = tot_jp - max_in_class
                 errors.append(
                     f"⛔ Guru Mutlak [{t['nama_guru']}] di Kelas [{kelas_nama}] mengampu total {tot_jp} JP, "
                     f"tetapi hanya memiliki {len(avail_days)} hari ketersediaan ({', '.join(avail_days) or 'Tidak Ada'}).\n"
-                    f"   • Batas maksimal darurat mengajar di 1 kelas adalah 4 JP/hari (Hard Constraint).\n"
+                    f"   • Batas maksimal darurat mengajar di 1 kelas adalah {limit} JP/hari (Hard Constraint).\n"
                     f"   💡 REKOMENDASI SOLUSI FORMASI:\n"
                     f"     1. (Tambah Hari Guru) Tambahkan ketersediaan hari {t['nama_guru']} minimal {needed_days} hari lagi (butuh minimal {min_days} hari).\n"
                     f"     2. (Kurangi Jam Alokasi) Kurangi beban alokasi jam mengajar {t['nama_guru']} di Kelas [{kelas_nama}] sebanyak {excess_jp} JP.\n"
                     f"     3. (Ubah Guru Pengampu) Lepas status Guru Mutlak atau bagikan sebagian jam ke guru lain yang memiliki kualifikasi di Tab 5."
                 )
+
+    # Check 1c: Mapel durasi > 3 JP wajib dipecah hari (memerlukan minimal 2 hari tersedia)
+    for a in allocations:
+        id_fixed = a.get("id_guru_mutlak")
+        if id_fixed and a["durasi_jp"] > 3:
+            t = teachers_map.get(id_fixed)
+            if t:
+                shift = a["shift_operasional"]
+                avail_days = t["hari_tersedia_pagi"] if shift == "PAGI" else t["hari_tersedia_siang"]
+                if len(avail_days) < 2:
+                    errors.append(
+                        f"⛔ Guru Mutlak [{t['nama_guru']}] mengampu Mapel [{a['nama_mapel']}] "
+                        f"dengan durasi {a['durasi_jp']} JP di Kelas [{a['nama_kelas']}], "
+                        f"tetapi hanya memiliki {len(avail_days)} hari ketersediaan ({', '.join(avail_days) or 'Tidak Ada'}).\n"
+                        f"   • Mapel dengan durasi > 3 JP tidak boleh diajarkan penuh dalam 1 hari (Maks 3 JP/hari untuk mapel yang sama).\n"
+                        f"   💡 REKOMENDASI SOLUSI FORMASI:\n"
+                        f"     1. (Tambah Hari Guru) Tambahkan ketersediaan hari {t['nama_guru']} minimal 1 hari lagi agar dapat memecah jadwal mapel ini.\n"
+                        f"     2. (Ubah Guru Pengampu) Serahkan mapel ini ke guru lain yang memiliki hari tersedia minimal 2 hari di Tab 5."
+                    )
 
     # 2. Shift Capacity & Availability check for each Subject
     # Group allocations by subject & shift
