@@ -36,6 +36,25 @@ def run_test():
             key = (entry['nama_guru'], entry['nama_kelas'], entry['hari'])
             grouped.setdefault(key, []).append(entry)
 
+        # Group by (class_name, mapel_name, day) to verify 3 JP limit per mapel
+        mapel_day_group = {}
+        for entry in schedule:
+            key = (entry['nama_kelas'], entry['nama_mapel'], entry['hari'])
+            mapel_day_group.setdefault(key, []).append(entry)
+
+        print("\n--- VERIFIKASI BATASAN KERAS 3 JP PER MAPEL PER HARI ---")
+        violations_3jp_limit = 0
+        for key, entries in mapel_day_group.items():
+            duration = len(entries)
+            if duration > 3:
+                violations_3jp_limit += 1
+                class_name, mapel_name, day = key
+                print(f"[ERR] Pelanggaran Batas 3 JP Mapel: Kelas {class_name} | Mapel {mapel_name} | Hari {day} | Durasi {duration} JP")
+        if violations_3jp_limit == 0:
+            print("[OK] Tidak ada pelanggaran batas 3 JP per mapel per hari!")
+        else:
+            print(f"[ERR] Terdeteksi {violations_3jp_limit} pelanggaran batas 3 JP per mapel!")
+
         print("\n--- ANALISIS GURU MENGAJAR 4 JP ATAU LEBIH DI SATU KELAS PADA SATU HARI ---")
         total_4jp_instances = 0
         single_mapel_4jp = 0
@@ -49,10 +68,6 @@ def run_test():
                 jps = sorted([e['jam_ke'] for e in entries])
                 mapels = list(set([e['nama_mapel'] for e in entries]))
                 
-                # Check if it's consecutive or split
-                # Let's check if there is a gap or a break
-                # Break is after JP 4. So if JP 4 and JP 5 are both in the list, they are split by break.
-                # Let's reconstruct the periods
                 periods_str = ", ".join([f"Jam-{p}" for p in jps])
                 mapels_str = " & ".join(mapels)
                 
@@ -62,18 +77,8 @@ def run_test():
                     status = "[OK] MULTI-MAPEL (Sangat Baik/Diutamakan)"
                 else:
                     single_mapel_4jp += 1
-                    # Check if it's split by break or other means
-                    # Since JP 1-4 is the only block without break, check if it is exactly JP 1, 2, 3, 4
-                    if jps == [1, 2, 3, 4]:
-                        status = "[ERR] SEKAT GAGAL: Berturut-turut Jam 1-4 tanpa sekat!"
-                    else:
-                        # Check for gaps or if it crosses JP 4/5 boundary
-                        has_break_split = 4 in jps and 5 in jps
-                        has_gap_split = any(jps[i+1] - jps[i] > 1 for i in range(len(jps)-1))
-                        if has_break_split or has_gap_split:
-                            status = "[OK] SINGLE-MAPEL (Berhasil disekat istirahat/jeda)"
-                        else:
-                            status = "[WARN] SINGLE-MAPEL (Berurutan but not 1-4? check slots)"
+                    # Since single mapel is now capped at 3 JP, this should theoretically be impossible to reach 4 JP!
+                    status = "[ERR] SINGLE-MAPEL (Melanggar batas 3 JP per mapel!)"
 
                 print(f"- Guru: {teacher_name:<30} | Kelas: {class_name:<10} | Hari: {day:<7} | Total: {jp_count} JP")
                 print(f"  Mapel: {mapels_str}")
@@ -83,7 +88,7 @@ def run_test():
         print("----------------------------------------------------------------------")
         print(f"Total Kasus Mengajar >= 4 JP: {total_4jp_instances}")
         print(f"  - Multi-Mapel             : {multi_mapel_4jp}")
-        print(f"  - Single-Mapel (disekat)  : {single_mapel_4jp}")
+        print(f"  - Single-Mapel (4 JP)     : {single_mapel_4jp}")
         print("----------------------------------------------------------------------")
 
     finally:

@@ -761,15 +761,10 @@ def _run_solver(teachers, classes, allocations, ts_set, subjects_map, stage, tim
             logger.warning(f"Alokasi [{aid}] tidak ada kandidat — infeasible untuk stage ini.")
             return None
 
-    # ── Constraint 2c: Dilarang mengajar mapel yang sama 4 JP berturut-turut pada Jam 1-4 ────
-    # Jika suatu mapel diajarkan 4 JP pada suatu hari, maka tidak boleh menempati Jam 1, 2, 3, 4 sekaligus.
+    # ── Constraint 2c: Maksimal 3 JP per Mapel per Kelas per Hari (HARD CONSTRAINT) ──
     for (cid, aid, day), vars_list in by_alloc_day.items():
-        p1_4_vars = [
-            var for key, var in x.items()
-            if key[0] == cid and key[1] == day and key[3] == aid and key[2] in (1, 2, 3, 4)
-        ]
-        if len(p1_4_vars) == 4:
-            model.Add(sum(p1_4_vars) <= 3)
+        if vars_list:
+            model.Add(sum(vars_list) <= 3)
 
     # ── Constraint 2b: 1 Kelas + 1 Mapel = hanya 1 Guru (HARD CONSTRAINT) ────
     # Untuk setiap alokasi (kelas+mapel), semua slot WAJIB diajarkan oleh
@@ -1050,19 +1045,7 @@ def _run_solver(teachers, classes, allocations, ts_set, subjects_map, stage, tim
             model.Add(sum(vars_list) != limit).OnlyEnforceIf(is_maxjp.Not())
             obj.append(-400 * is_maxjp)
 
-            # Soft constraint: Penalti jika guru mengajar >= 4 JP untuk mapel yang sama
-            allocs_ct = class_teacher_allocs.get((cid, tid), [])
-            for a in allocs_ct:
-                aid = a["id_class_subject"]
-                vars_a = [
-                    var for key, var in x.items()
-                    if key[0] == cid and key[1] == day and key[3] == aid and key[4] == tid
-                ]
-                if len(vars_a) >= 4:
-                    is_single_mapel_ge_4 = model.NewBoolVar(f"single_ge4_c{cid}_t{tid}_a{aid}_{day}")
-                    model.Add(sum(vars_a) >= 4).OnlyEnforceIf(is_single_mapel_ge_4)
-                    model.Add(sum(vars_a) <= 3).OnlyEnforceIf(is_single_mapel_ge_4.Not())
-                    obj.append(-600 * is_single_mapel_ge_4)
+
 
     # ── Constraint: Pemisahan Hari untuk Guru Multi-Mapel di Kelas Sama ────────
     if split_multi_subject:
